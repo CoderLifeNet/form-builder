@@ -169,7 +169,7 @@ Records and published definitions are immutable through normal update APIs; auth
 
 Include explicit migration CLI/status, transactional behavior where supported, locking against competing runners, and a version ledger. Importing a package or starting the application must not silently migrate databases. Never rewrite an already-released migration. Seed development data separately and idempotently.
 
-Test a fresh database and a genuine sequential upgrade preserving definitions, revisions, IDs and file references. Do not manufacture meaningless schema churn merely to claim an upgrade test. Document supported starting schemas, backups, failure recovery, any nontransactional step, and rollback limitations.
+Test a fresh database and migration runner/ledger/locking/repeatability/failure behavior. Test a genuine upgrade preserving definitions, revisions, IDs and file references only where a meaningful retained earlier schema exists; this unreleased project does not need artificial prototype upgrade paths. Do not manufacture meaningless schema churn merely to claim an upgrade test. Document supported starting schemas, backups, failure recovery, any nontransactional step, and rollback limitations.
 
 Supply managed-record mode first, with optional host business-reference metadata. Document how to render/map host properties without promising automatic historical management of arbitrary host-owned business tables. Do not build uncoordinated dual writes to TrackForge tasks.
 
@@ -243,7 +243,7 @@ Private downloads must be authorized, with safe filenames/content disposition an
 
 Define pending-upload expiry and cleanup, canceled uploads, removed file references, old revisions, retention and permanent erasure. Failed submission keeps safely resumable completed uploads without creating orphaned permanent records. Upload retries and completion must be idempotent.
 
-Provide filesystem-only setup and actual Garage-backed S3-compatible tests. Garage is an optional reference profile, not a core dependency. Credentials and private provider routing stay server-side. Changing the default adapter must not orphan existing files; retain old routing or explicitly transfer them. See `docs/file-storage.md`. Documents state production storage/encryption/key-management responsibilities. No files can be default-prefilled through a browser file input.
+Provide filesystem-only setup and actual Garage-backed S3-compatible tests. Garage is an optional reference profile, not a core dependency. Credentials and private provider routing stay server-side. This unreleased build requires no legacy storage routing or transfer tools for abandoned providers; use the clean-slate rules in `docs/prompts/continue-first-working-version.md`. See `docs/file-storage.md`. Documents state production storage/encryption/key-management responsibilities. No files can be default-prefilled through a browser file input.
 
 ## 14. Duplicate, export, and import
 
@@ -347,7 +347,7 @@ Implement meaningful automated tests at appropriate layers and record exact comm
 | A16 | Export omits runtime records/secrets; malformed/oversized/unsupported/polluting imports and unsafe patterns are rejected. |
 | A17 | Compact capture cannot bypass requiredness/server validation; omitted field errors are actionable without exposing unauthorized fields. |
 | A18 | Archive/restore and authorized retention/erasure work, including file cleanup and failure recovery. |
-| A19 | Fresh install plus meaningful sequential schema upgrade preserve supported historical data and expose migration status/failure behavior. |
+| A19 | Fresh install and migration runner/ledger/locking/repeatability/failure checks pass. Exercise a genuine retained-schema upgrade where applicable; no artificial pre-release prototype upgrade path is required. Future released upgrades must preserve supported historical data. |
 | A20 | Packed-package external consumer fixture works without importing workspace source or server code into the browser. |
 | A21 | Automated accessibility checks and keyboard/focus/responsive manual developer checks run across builder, capture, dialogs/history at desktop and narrow widths. Human review remains pending until a human reviews. |
 | A22 | Minimal and workspace/project example guides are executed as written; documentation matches actual commands and APIs. |
@@ -374,3 +374,7 @@ The final conversational report should be concise and point to these files. Do n
 If an environment limitation prevents verification, distinguish implemented-but-unverified from tested work, give the exact blocker, and complete independent work. If runtime scope is incomplete, say so. Never substitute “ready for production” for evidence.
 
 Begin with repository inspection and the task plan, then proceed directly through execution.
+
+## Continuation clarification — unreleased clean slate
+
+The latest continuation prompt governs cleanup and pre-release migration applicability. Remove abandoned provider code/configuration, not legitimate generic S3 support. No customer data/provider compatibility preservation is needed for this initial development build. Historical correctness within the engine is still mandatory.
