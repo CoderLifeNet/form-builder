@@ -2,13 +2,81 @@
 
 A reusable form engine for visually designing forms, publishing immutable definitions, collecting and editing records, and reviewing historical changes.
 
-**Status: discovery and design.** Repository baseline: `0.0.0`. No npm package, runtime, migration, or release is available yet. Naming and package names are provisional.
+Status: implementation baseline in progress (internal candidate `0.1.0`, unpublished).
+
+This repository now contains a runnable monorepo with core contracts, a PostgreSQL-backed service baseline, React packages, two example hosts, and local infrastructure scripts.
+
+Scope is still in active delivery. Not every requirement from `docs/prompts/first-working-version.md` is complete yet. See sprint evidence for exact pass/partial/fail items.
+
+## Quick start
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Start local infrastructure:
+
+```bash
+npm run dev:infra
+```
+
+3. Build packages/apps:
+
+```bash
+npm run build
+```
+
+4. Run migrations and seed (host port is `55432`):
+
+```bash
+FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate
+FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed
+```
+
+5. Run tests:
+
+```bash
+FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm test
+```
+
+6. Build packed artifacts and verify consumer fixture:
+
+```bash
+npm run pack:artifacts
+npm run verify:consumer
+```
+
+7. Stop local infrastructure:
+
+```bash
+npm run dev:infra:down
+```
+
+## Workspace layout
+
+- `packages/form-core`: schemas, stable IDs, normalization, rule helpers.
+- `packages/form-postgres`: migrations and repository implementation.
+- `packages/form-server`: Express HTTP adapter and policy/source extension points.
+- `packages/form-react`: renderer/history components baseline.
+- `packages/form-builder`: manager/builder components baseline.
+- `apps/example-minimal`: minimal host integration example.
+- `apps/example-workspace`: workspace/project-oriented host example.
+- `fixtures/consumer-smoke`: packed-artifact fixture checks.
 
 ## Intended developer experience
 
 Install the supported packages, configure a database, run provided migrations, connect trusted identity and permission checks, mount the backend and React interfaces, and use the complete form lifecycle. Consumers retain ownership of their data and deployments.
 
-The engine will provide form persistence, server validation, field error mapping, versioning, record history, concurrency handling, and integration contracts. Authentication is host-controlled; server authorization is mandatory.
+The baseline currently provides:
+- core schema validation and stable identity utilities,
+- form draft/publish persistence in PostgreSQL,
+- server-side idempotency storage and replay checks,
+- initial renderer and builder/manager package APIs,
+- two buildable host examples.
+
+Authentication remains host-controlled; server authorization is mandatory.
 
 ## Product scope
 
@@ -35,10 +103,12 @@ Start with the [documentation index](docs/README.md).
 - [Roadmap and delivery criteria](docs/roadmap.md)
 - [Versioning and releases](docs/versioning.md)
 - [Integration and public documentation plan](docs/integration.md)
+- [Sprint plan](docs/sprints/first-working-version.md)
+- [Sprint evidence report](docs/sprints/first-working-version-report.md)
 
 ## Development and contributions
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md). Implementation begins only after its design and scope are explicitly authorized. There are currently no install, build, or runtime test commands.
+See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md). Work is now in implementation mode for this repository only, under the boundaries defined in the sprint prompt and repository instructions.
 
 Major versions are owner-controlled. Remain on `0.x.x` until Chris explicitly approves `1.0.0`; neither commit messages nor automation may authorize that transition.
 

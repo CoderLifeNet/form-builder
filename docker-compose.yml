@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:17.2
+    container_name: formbuilder-postgres
+    environment:
+      POSTGRES_DB: formbuilder
+      POSTGRES_USER: formbuilder
+      POSTGRES_PASSWORD: formbuilder
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  localstack:
+    image: localstack/localstack:4.0.3
+    container_name: formbuilder-localstack
+    environment:
+      SERVICES: s3
+      DEBUG: "0"
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+
+  localstack-init:
+    image: amazon/aws-cli:2.22.20
+    depends_on:
+      - localstack
+    entrypoint: >
+      /bin/sh -c "
+      aws --endpoint-url http://localstack:4566 --region us-east-1 s3api create-bucket --bucket form-builder-dev || true
+      "
+
+volumes:
+  postgres_data:
+  localstack_data:
