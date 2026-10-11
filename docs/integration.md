@@ -38,3 +38,7 @@ Each release includes updated examples, migration notes and breaking-change guid
 A fresh consumer must complete the guide without inventing missing infrastructure or implementing engine internals.
 Test the reference path against documented package/database versions, including saved forms, failed requests, file permissions and upgrades.
 Publishing documentation to coderlife.net is a later explicit work package; this repository setup does not modify that site.
+
+## File storage choices
+
+See [file storage](file-storage.md). Offer filesystem-only server uploads, optional Garage Docker setup, bring-your-own S3-compatible storage and custom-adapter examples. Object storage is not a requirement for all consumers. Publish actual tested provider/API compatibility and persistence/backup guidance.
