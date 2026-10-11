@@ -40,7 +40,7 @@ Default to a TypeScript workspace with:
 - React renderer and reusable form manager/builder/record-history components, organized by responsibility.
 - Node.js service with a thin Express HTTP adapter.
 - Storage contracts and a PostgreSQL reference implementation. Default to explicit SQL migrations and a maintained PostgreSQL driver rather than adding an ORM solely for convenience. If current repository code already establishes a viable maintained alternative, retain it and explain the choice.
-- Upload storage contracts and an S3-compatible reference integration. Provide a local object-storage development setup, such as MinIO, so uploads actually work without a paid external account.
+- Provider-neutral upload storage contracts, a private local filesystem adapter, and an S3-compatible adapter. Provide optional Garage Docker Compose using a pinned official image and tested configuration. No-file forms need no storage provider; filesystem uploads require no object-storage service. See `docs/file-storage.md`.
 - A Vite/React reference host application using the real service and database.
 - Package artifacts and an external-consumer smoke fixture that install packed tarballs, not only workspace source aliases.
 
@@ -243,7 +243,7 @@ Private downloads must be authorized, with safe filenames/content disposition an
 
 Define pending-upload expiry and cleanup, canceled uploads, removed file references, old revisions, retention and permanent erasure. Failed submission keeps safely resumable completed uploads without creating orphaned permanent records. Upload retries and completion must be idempotent.
 
-Provide real S3-compatible local setup and tests. Credentials stay server-side. Documents state production storage/encryption/key-management responsibilities. No files can be default-prefilled through a browser file input.
+Provide filesystem-only setup and actual Garage-backed S3-compatible tests. Garage is an optional reference profile, not a core dependency. Credentials and private provider routing stay server-side. Changing the default adapter must not orphan existing files; retain old routing or explicitly transfer them. See `docs/file-storage.md`. Documents state production storage/encryption/key-management responsibilities. No files can be default-prefilled through a browser file input.
 
 ## 14. Duplicate, export, and import
 
@@ -325,7 +325,7 @@ Keep package versions coherent with VERSION/changelog. Choose a simple lockstep 
 
 ## 19. Required acceptance evidence
 
-Implement meaningful automated tests at appropriate layers and record exact commands/results. Use actual PostgreSQL and object storage for integration tests. Mocked unit tests supplement rather than replace these checks.
+Implement meaningful automated tests at appropriate layers and record exact commands/results. Use actual PostgreSQL, filesystem storage and Garage for the respective integration paths. Mocked unit tests supplement rather than replace these checks.
 
 | ID | Scenario that must pass |
 | --- | --- |
@@ -341,7 +341,7 @@ Implement meaningful automated tests at appropriate layers and record exact comm
 | A10 | Outsider/other-tenant forged requests cannot load, save, publish, export, resolve sources, read history, attach files or download objects. Authorized collaborators work according to host policy. |
 | A11 | Lost mutation responses and duplicate retries create one result; changed payload with same key fails; cached replay rechecks permissions. |
 | A12 | Conflicts, session expiry, revoked permissions, network failures and stale async source results preserve safe state and produce truthful recovery. |
-| A13 | Single/multiple uploads enforce content/size/count restrictions; completion/download authorization, retry/cancel, orphan cleanup and historical references work. |
+| A13 | Single/multiple uploads enforce content/size/count restrictions; completion/download authorization, retry/cancel, orphan cleanup and historical references work against private filesystem and actual Garage through the same contract. No-file forms require no provider; filesystem mode needs no object-store container. |
 | A14 | Duplicate/import allocate fresh identities, remap all internal references, preserve behavior and cannot change source forms. |
 | A15 | Replacement import preserves destination placement/old records, validates before replacing, and blocks publication until capability dependencies are deliberately reconciled. |
 | A16 | Export omits runtime records/secrets; malformed/oversized/unsupported/polluting imports and unsafe patterns are rejected. |
