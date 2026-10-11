@@ -24,7 +24,7 @@ Supply Compose/configuration/scripts rather than inventing a proprietary Garage 
 Provide streamed writes, verification/completion, authorized reads/downloads, metadata/stat, cancellation and deletion/cleanup through provider-neutral operations. Direct presigned upload/download is an optional adapter capability, not required for traditional uploads.
 The engine owns validation, trusted tenant/owner association, attachment authorization, upload state, record linkage, idempotency, expiration and retention rules. The adapter owns byte storage and provider mechanics; it does not replace engine authorization.
 
-Use stable opaque file identities in saved values. Server-private metadata resolves each file to its provider/object location; do not store signed URLs, bucket credentials or absolute filesystem paths in form definitions or portable exports. Changing the default adapter does not relocate existing files: retain routing for prior provider IDs, or perform a separately planned and verified transfer.
+Use stable opaque file identities in saved values. Server-private metadata resolves each file to its provider/object location; do not store signed URLs, bucket credentials or absolute filesystem paths in form definitions or portable exports. This unreleased project has no customer storage installations to migrate. Do not implement legacy provider routing, storage-transfer utilities or compatibility paths for abandoned prototypes. Storage relocation after release would require a separate future design.
 
 Database commits and file writes do not share a transaction. Model pending/verified/attached/deletion-pending states and compensating cleanup. Do not report erasure complete while deletion failed. Historical revisions keep valid file references subject to authorized retention/erasure.
 
@@ -51,3 +51,7 @@ Verify official image/version/configuration and supported operations during impl
 Run the upload lifecycle suite against both filesystem and actual Garage, through the same API/renderer contract: single/multiple files, validation, progress, retry/cancel, permission isolation, restart persistence, historical references and deletion/orphan cleanup.
 The filesystem example must run without Garage/S3/LocalStack. No-file examples must run without a configured storage adapter.
 Core/browser packages must not eagerly require a storage SDK. Preserve database/provider separation in packed-package tests and document which combinations were actually tested.
+
+## Unreleased clean-slate clarification
+
+Remove abandoned MinIO/LocalStack code/configuration rather than retaining deprecated paths. Project-scoped disposable development data can be reset/reseeded; unrelated resources and developer work must remain intact. Consolidate unreleased prototype schemas where appropriate while retaining migration runner/ledger/locking/status and tests. Do not manufacture artificial upgrade paths. Product form/record history remains required.
