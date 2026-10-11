@@ -48,3 +48,7 @@ D20: Approved direction: provider-neutral upload engine; optional Garage Docker 
 Implementation: not verified here. Provider tests: not verified here. Human review: pending.
 
 Copilot's reported local baseline remains incomplete against its own A01–A22 matrix. Only main was visible through the connector during this documentation update; local implementation code was not reviewed. The continuation prompt directs code/test reconciliation on the existing implementation branch.
+
+## October 11, 2026 — unreleased cleanup policy
+
+Approved clarification: no deployed customer files/records exist. Remove abandoned provider implementations and do not create legacy routing/transfer/compatibility code. Project-scoped disposable development resources may be reset. Consolidate unreleased prototype schemas while retaining functional migration infrastructure; avoid artificial upgrade tests. This does not relax product history/immutability requirements. Runtime cleanup and acceptance remain unverified here.
