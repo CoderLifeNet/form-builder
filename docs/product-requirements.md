@@ -94,3 +94,7 @@ Target WCAG 2.2 AA across builder, renderer, preview, dialogs and history: keybo
 
 Provide installable packages, initial and upgrade migrations, tested setup instructions and a working reference integration.
 Publish public documentation on CoderLifeNet with quick-start npm README links, API reference, troubleshooting, compatibility and upgrade guides.
+
+## Upload provider clarification — October 11, 2026
+
+The engine must be storage-agnostic. Garage is the optional supplied Docker reference, not a mandatory runtime service. The revised initial scope includes private filesystem uploads and an S3-compatible adapter, with a documented custom-provider contract. No-file forms require no storage provider. See [file storage](file-storage.md) for responsibilities and acceptance checks.
