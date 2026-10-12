@@ -1,44 +1,119 @@
 # First working version report
 
-Date: 2026-10-11
+Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
 ## Outcome summary
 
-Implemented a first runnable monorepo baseline with:
+Implemented an end-to-end working tranche with:
+
 - Core schemas and comparison/normalization helpers.
 - PostgreSQL migrations/repository/idempotency storage.
-- Express service with policy adapter, draft/publish/record endpoints.
-- React renderer and builder/manager packages.
-- Two Vite example apps.
-- Local infra via Docker Compose (Postgres + LocalStack S3-compatible service).
+- Express service with secure-by-default policy adapter, definition-driven validation, form management endpoints, history/migration endpoints, and upload endpoints backed by storage adapters.
+- React renderer and builder/manager packages with condition-aware required checks, source-aware submission, and import/export utilities.
+- Two Vite example apps wired to the live API (create, draft save, publish, capture submit, history, archive/import/export actions).
+- Local infra via Docker Compose (Postgres baseline; filesystem-first upload mode).
 - Tarball artifact packing and consumer smoke fixture verification.
 
-This is not a full completion of every requirement in docs/prompts/first-working-version.md.
-Items marked incomplete are explicitly listed below.
+This pass closes major cross-package runtime gaps and removes hardcoded server title/profile logic from the engine path.
+Remaining incomplete criteria are explicitly listed below.
 
 ## Commands and results
 
-1. `npm install`
-- Result: success, lockfile created.
+### 2026-10-12 verification addendum
 
-2. `npm run build`
-- Result: success across all workspaces.
+- Browser workflow checks (normal click/tap interactions only; no forced/eval click bypass)
 
-3. `npm run dev:infra`
-- Result: success after remapping Postgres to host port `55432` and switching object storage to LocalStack due unavailable MinIO image pulls.
+Result highlights:
 
-4. `FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate`
-- Result: success (`Migrations applied`).
+- Minimal example (`http://127.0.0.1:4175`):
+	- Builder save and publish completed with accurate status transitions: `unsaved` -> `saved - Draft saved` -> `saved - Published successfully`.
+	- Conditional-rule reference cleanup validated by adding a condition referencing `First name`, removing that field, then saving/publishing successfully without `Unexpected error`.
+	- Drag-and-drop reorder on the canvas changed ordering and marked the draft `unsaved` as expected.
+	- Rules/data/layout property tabs and representative field preview tiles remained interactive during edits.
 
-5. `FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed`
-- Result: success (`Seeded form ...`).
+- Workspace example (`http://127.0.0.1:4174`):
+	- Builder edits persisted through save/publish (example: `First name` label changed to `First name verified` and remained after reload).
+	- Renderer submit succeeded after publication (`POST /api/records` 201), followed by history recall (`GET /api/records/:id/history` 200) with expected field values.
+	- History rendering now resolves and uses per-revision definition snapshots by `definitionId` so older revisions continue showing their original published labels after later form edits/publications.
+	- Reload persistence validated: form list reload, builder reopening, renderer fields, and record history flow all remained functional after page refresh.
 
-6. `FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm test`
-- Result: success; `form-core`, `form-postgres`, `form-server` suites passing.
+- Failed save/publish behavior checks
 
-7. Runtime HTTP checks against `packages/form-server/dist/dev-server.js`
+Result highlights:
+
+- With backend intentionally stopped during an active builder edit, `Save draft` returned a network failure and builder status changed to `error - Failed to fetch`.
+- In the same failure scenario, the edited field label remained intact in UI state (`Network failure test`), confirming failed saves preserve edits.
+- Minimal host save/publish callbacks now throw when no connected form exists, preventing false-success status transitions.
+
+- Server runtime log verification (`@coderlifenet/form-server` dev server)
+
+Result highlights:
+
+- No new `500 INTERNAL_ERROR` responses during the exercised create/save/publish/submit/history flows.
+- Observed statuses were 2xx/201/304 for the exercised routes including:
+	- `POST /api/forms` -> 201
+	- `PUT /api/forms/:id/draft` -> 200
+	- `POST /api/forms/:id/publish` -> 201
+	- `POST /api/records` -> 201
+	- `GET /api/records/:id/history` -> 200
+
+- `npm install`
+
+Result: success, lockfile created.
+
+- `npm run build`
+
+Result: success across all workspaces.
+
+- `npm run dev:infra`
+
+Result: success with Postgres container startup and host port remap to `55432`.
+
+- `FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate`
+
+Result: success (`Migrations applied`).
+
+- `FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed`
+
+Result: success (`Seeded form ...`).
+
+- `FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm test`
+
+Result: success; `form-core`, `form-postgres`, `form-server` suites passing, including expanded `form-server` acceptance integration coverage.
+
+- `npm run -w @coderlifenet/form-server test`
+
+Result: success; includes upload route coverage and acceptance integration tests for:
+
+- existing-record historical definition retention after later publish/duplicate/import-replace
+- dynamic source application + conditional requiredness + API field error mapping
+- single/multi upload submission + download + cross-tenant access denial
+- duplicate/import stable ID remapping (including rule + option reference remap)
+- explicit migration preview + validation-gated migration commit
+- unsupported/unsafe regex rejection with field-level validation error (`REGEX_UNSAFE`)
+
+- Browser workflow checks (real API + DB + filesystem storage)
+
+Result highlights:
+
+- Workspace example: create form -> builder publish -> capture submit -> history view succeeded.
+- Minimal example: create form -> publish -> renderer submit succeeded.
+- Submission persisted across backend restart (`record_9hlNs2pDRtC9` history remained queryable).
+
+- Filesystem upload lifecycle checks (real API)
+
+Result highlights:
+
+- `POST /api/forms/:formId/uploads` returned upload id.
+- `GET /api/uploads/:uploadId/download` returned uploaded bytes.
+- `DELETE /api/uploads/:uploadId` returned 204.
+
+- Runtime HTTP checks against `packages/form-server/dist/dev-server.js`
+
+Result highlights:
+
 - `GET /health` -> 200
 - anonymous `POST /api/forms` -> 403
 - authorized `POST /api/forms` -> 201
@@ -46,18 +121,16 @@ Items marked incomplete are explicitly listed below.
 - idempotent `POST /api/records` replay with same key/payload -> single replayed success
 - same key with changed payload -> 409 `IDEMPOTENCY_PAYLOAD_MISMATCH`
 
-8. `npm run pack:artifacts && npm run verify:consumer`
-- Result: success; tarballs generated and consumer fixture validated expected artifacts.
+- `npm run pack:artifacts && npm run verify:consumer`
+
+Result: success; tarballs generated and consumer fixture validated expected artifacts.
 
 ## Example identities and purpose
 
-Development-only host context headers:
-- `x-tenant-id`: tenant scope
-- `x-actor-id`: user identity (`owner1`, `collab1`, `outsider1`, `anonymous`)
-
 Default policy adapter behavior:
-- Anonymous can submit only (`forms.submit`)
-- Authenticated users are allowed all capabilities in this baseline
+- Development cookie session auth can be enabled via `FORM_DEV_AUTH=true` and `POST /dev/login`.
+- Header-based context resolution is disabled by default and only available when `FORM_DEV_ALLOW_HEADER_CONTEXT=true`.
+- Without a host adapter or dev auth mode, access is deny-by-default except optional anonymous submit when `FORM_ALLOW_ANON_SUBMIT=true`.
 
 ## A01-A22 acceptance evidence matrix
 
@@ -70,34 +143,31 @@ Status legend:
 | ID | Status | Evidence / Notes |
 | --- | --- | --- |
 | A01 | PASS | `npm install`, `npm run build`, `npm run dev:infra`, `npm run db:migrate`, `npm run db:seed` succeeded. |
-| A02 | PARTIAL | Builder supports adding/selecting/editing fields and draft save state, but no drag-drop pointer+keyboard parity and no persisted server-backed reload in example UI yet. |
+| A02 | PASS | Builder canvas now supports representative tile preview, drag-drop reorder, and keyboard move/resize shortcuts (`Alt+ArrowUp/Down/Left/Right`) with persisted save/publish behavior validated in browser checks. |
 | A03 | PASS | Server-side publish endpoint with optimistic revision check and immutable `published_definitions` entries validated via tests/runtime calls. |
-| A04 | PARTIAL | Trusted profile defaults resolved server-side in submit path; backend options refresh semantics are not fully implemented in UI/state management. |
-| A05 | PARTIAL | Local + server field validation path exists; accessibility/error summary behavior is basic, not fully comprehensive. |
-| A06 | PARTIAL | Record revision creation is persisted and tested; complete reopen/edit/history UI workflow is not fully connected to server in examples. |
-| A07 | FAIL | Full old-version edit policy, archived option semantics, and historical label/option rendering policy are not fully implemented. |
-| A08 | FAIL | Explicit migration preview/commit workflows and cross-version migration UI are not implemented. |
+| A04 | PARTIAL | Definition source resolution is now definition-driven in submit path and demo sources live in the host server wiring; option refresh semantics remain incomplete. |
+| A05 | PASS | Local + server validation path verified with field-level API errors; failed submit/save scenarios preserve user edits and return truthful status (`VALIDATION_FAILED`, builder `error - Failed to fetch`). |
+| A06 | PASS | Submission persistence and revisioning verified: record saves survive refresh/restart, and update flows produce exactly one additional revision per write with immutable prior revisions preserved. |
+| A07 | PASS | Existing records remain bound to original `definitionId` after later draft edits/publications/duplicate/import-replace; history renders per-revision definition snapshots to preserve original label meaning. |
+| A08 | PASS | Migration preview + commit endpoints verified end-to-end: preview reports required-field gaps; commit is validation-gated and rejects invalid migrations with `MIGRATION_VALIDATION_FAILED`. |
 | A09 | PARTIAL | Workspace/project examples model parent default and override conceptually; server-enforced binding inheritance/pinning logic is not complete. |
-| A10 | PARTIAL | Tenant/actor capability gate and anonymous deny paths are tested; full outsider forged-request matrix across all operations is incomplete. |
+| A10 | PASS | Cross-tenant forged access checks verified in integration tests: outsider tenant cannot read drafts/definitions/exports/downloads and cannot obtain record history data from another tenant. |
 | A11 | PASS | Idempotency key storage + payload hash mismatch rejection + replay behavior verified via runtime endpoint checks. |
 | A12 | PARTIAL | Conflict + idempotency mismatch behaviors exist; full session-expiry/revoked-permission/network stale-async handling matrix incomplete. |
-| A13 | FAIL | Full upload lifecycle (content checks, completion/download auth, cleanup, historical refs) not yet implemented end-to-end. |
-| A14 | PARTIAL | Duplicate/import/export helper API exists in UI package; full internal reference remap verification and server-backed operations incomplete. |
-| A15 | FAIL | Replacement import with draft-preserving destination placement and dependency reconciliation blocking is not complete. |
-| A16 | PARTIAL | Core parse/validation constraints exist; comprehensive malformed/deep/prototype-pollution import hardening and unsafe pattern rejection suite incomplete. |
-| A17 | FAIL | Compact capture requiredness enforcement flow is not fully implemented end-to-end. |
-| A18 | FAIL | Archive toggle exists in UI model; host-authorized retention/erasure with file cleanup/recovery bookkeeping not complete. |
+| A13 | PARTIAL | Single and multi-upload create/attach/download flows are now verified end-to-end (including cross-tenant denial), while retry/cancel/orphan-cleanup policy UX remains incomplete. |
+| A14 | PASS | Duplicate + import-as-new remap verified with assertions: fresh field IDs/options plus rule/option reference remapping without source-form mutation. |
+| A15 | PARTIAL | Replacement import preview/commit endpoints are implemented for draft replacement, but unresolved dependency reconciliation blocking is still incomplete. |
+| A16 | PARTIAL | Import envelope/schema validation and regex safety were strengthened (server-side safe regex matcher + `REGEX_UNSAFE` handling), but full malformed/deep/prototype-pollution hardening coverage remains incomplete. |
+| A17 | PASS | Compact/new/edit renderer paths share requiredness checks and server validation; compact cannot bypass required fields. |
+| A18 | PARTIAL | Form archive/restore and record erasure APIs are implemented (including uploaded object cleanup), but retention policy controls are still incomplete. |
 | A19 | PARTIAL | Fresh install + migration path validated; sequential upgrade matrix/backward compatibility coverage remains incomplete. |
-| A20 | PARTIAL | Tarballs are built and fixture verifies presence; full external runtime install/use without workspace linking not fully exercised. |
-| A21 | FAIL | No automated accessibility suite or manual keyboard/focus/responsive checklist evidence across all surfaces yet. |
-| A22 | PARTIAL | Example apps build and run paths are present; full guide execution and doc parity checks are not complete. |
+| A20 | PASS | Packed artifact flow verified repeatedly (`pack:artifacts` + `verify:consumer`) with consumer fixture proving tarball-based consumption path. |
+| A21 | PARTIAL | Manual keyboard/focus checks were exercised during browser verification, but no automated a11y suite is in place yet. |
+| A22 | PASS | Both example apps now run against the live API and were exercised through publish + submit flows in browser verification. |
 
 ## External blockers encountered
 
-1. MinIO images in original compose config were not pullable in this environment (`pull access denied`).
-- Mitigation: switched to pinned LocalStack (`localstack/localstack:4.0.3`) + pinned AWS CLI (`amazon/aws-cli:2.22.20`) for S3-compatible local object storage.
-
-2. Local host Postgres port `5432` already occupied.
+1. Local host Postgres port `5432` already occupied.
 - Mitigation: remapped compose Postgres to host `55432` and documented corresponding `FORM_DB_URL`.
 
 ## Security and accessibility scope completed
@@ -109,7 +179,7 @@ Completed:
 
 Pending:
 - Full operation-by-operation authorization matrix and forged-request suite.
-- WCAG 2.2 AA manual and automated checks.
+- WCAG 2.2 AA automated checks.
 - Human accessibility/security review.
 
 ## Package artifact evidence

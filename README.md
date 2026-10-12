@@ -16,39 +16,41 @@ Scope is still in active delivery. Not every requirement from `docs/prompts/firs
 npm install
 ```
 
-2. Start local infrastructure:
+1. Start local infrastructure:
 
 ```bash
 npm run dev:infra
 ```
 
-3. Build packages/apps:
+Uploads default to private filesystem storage. Configure optional S3-compatible storage via `.env` values described in `docs/file-storage.md`.
+
+1. Build packages/apps:
 
 ```bash
 npm run build
 ```
 
-4. Run migrations and seed (host port is `55432`):
+1. Run migrations and seed (host port is `55432`):
 
 ```bash
 FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate
 FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed
 ```
 
-5. Run tests:
+1. Run tests:
 
 ```bash
 FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm test
 ```
 
-6. Build packed artifacts and verify consumer fixture:
+1. Build packed artifacts and verify consumer fixture:
 
 ```bash
 npm run pack:artifacts
 npm run verify:consumer
 ```
 
-7. Stop local infrastructure:
+1. Stop local infrastructure:
 
 ```bash
 npm run dev:infra:down
@@ -70,6 +72,7 @@ npm run dev:infra:down
 Install the supported packages, configure a database, run provided migrations, connect trusted identity and permission checks, mount the backend and React interfaces, and use the complete form lifecycle. Consumers retain ownership of their data and deployments.
 
 The baseline currently provides:
+
 - core schema validation and stable identity utilities,
 - form draft/publish persistence in PostgreSQL,
 - server-side idempotency storage and replay checks,
@@ -103,6 +106,7 @@ Start with the [documentation index](docs/README.md).
 - [Roadmap and delivery criteria](docs/roadmap.md)
 - [Versioning and releases](docs/versioning.md)
 - [Integration and public documentation plan](docs/integration.md)
+- [File storage adapters and setup](docs/file-storage.md)
 - [Sprint plan](docs/sprints/first-working-version.md)
 - [Sprint evidence report](docs/sprints/first-working-version-report.md)
 

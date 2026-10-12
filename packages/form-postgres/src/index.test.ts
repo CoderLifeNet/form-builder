@@ -6,11 +6,14 @@ const dbUrl = process.env.FORM_DB_URL;
 const integration = dbUrl ? describe : describe.skip;
 
 integration("form postgres integration", () => {
-  const pool = makePool(dbUrl);
-  const repo = new FormRepository(pool);
-  const runner = new MigrationRunner(pool);
+  let pool: ReturnType<typeof makePool>;
+  let repo: FormRepository;
+  let runner: MigrationRunner;
 
   beforeAll(async () => {
+    pool = makePool(dbUrl);
+    repo = new FormRepository(pool);
+    runner = new MigrationRunner(pool);
     await runner.migrate();
   });
 

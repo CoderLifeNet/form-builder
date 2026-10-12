@@ -1,52 +1,212 @@
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { FormBuilder } from "@coderlifenet/form-builder";
 import { FormRenderer } from "@coderlifenet/form-react";
+import type { FormDefinition } from "@coderlifenet/form-core";
+import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
-const initialDefinition = {
-  metadata: { formId: "demo-min", name: "Minimal service request" },
+const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://localhost:4010";
+
+const definition: FormDefinition = {
+  metadata: { formId: "demo-min", name: "Minimal service request", schemaVersion: "1.0.0" },
   sections: [
     { id: "sec_a", title: "Your details", order: 0 },
     { id: "sec_b", title: "Request", order: 1 }
   ],
   fields: [
-    { id: "first_name", key: "first_name", type: "text", label: "First name", required: true, sectionId: "sec_a", row: 0, width: 6, rules: [] },
-    { id: "last_name", key: "last_name", type: "text", label: "Last name", required: true, sectionId: "sec_a", row: 0, width: 6, rules: [] },
-    { id: "title", key: "title", type: "text", label: "Request title", required: true, sectionId: "sec_b", row: 0, width: 12, rules: [] }
+    {
+      id: "field_first_name",
+      key: "field_first_name",
+      type: "text",
+      label: "First name",
+      required: true,
+      sectionId: "sec_a",
+      row: 0,
+      width: 6,
+      source: { id: "profile.first_name", version: "1", mode: "display_only" },
+      rules: []
+    },
+    {
+      id: "field_last_name",
+      key: "field_last_name",
+      type: "text",
+      label: "Last name",
+      required: true,
+      sectionId: "sec_a",
+      row: 0,
+      width: 6,
+      source: { id: "profile.last_name", version: "1", mode: "display_only" },
+      rules: []
+    },
+    {
+      id: "field_title",
+      key: "field_title",
+      type: "text",
+      label: "Request title",
+      required: true,
+      sectionId: "sec_b",
+      row: 0,
+      width: 12,
+      validation: { minLength: 4 },
+      rules: []
+    }
   ],
-  dependencyVersions: {}
+  dependencyVersions: {
+    "profile.first_name": "1",
+    "profile.last_name": "1"
+  }
 };
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {})
+    }
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ message: response.statusText }));
+    throw new Error(body.message ?? `Request failed: ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
 
 export function App(): JSX.Element {
   const [mode, setMode] = useState<"builder" | "renderer">("builder");
-  const definition = useMemo(() => initialDefinition, []);
+  const [useCustomTheme, setUseCustomTheme] = useState(false);
+  const [formId, setFormId] = useState<string>("");
+  const [draftRevision, setDraftRevision] = useState<number>(1);
+  const [definitionId, setDefinitionId] = useState<string>("");
+  const [status, setStatus] = useState<string>("Connecting...");
 
-  return (
-    <main style={{ maxWidth: 1100, margin: "0 auto", padding: 20 }}>
-      <h1>Minimal integration example</h1>
-      <p>Uses shared packages with a real backend contract.</p>
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button type="button" onClick={() => setMode("builder")}>Builder</button>
-        <button type="button" onClick={() => setMode("renderer")}>Renderer</button>
-      </div>
-      {mode === "builder" ? (
-        <FormBuilder
-          initialDefinition={definition as any}
-          onSaveDraft={async () => {
-            // Example-only placeholder; real service integration is in workspace example.
-          }}
-          onPublish={async () => {
-            // Example-only placeholder.
-          }}
-        />
-      ) : (
-        <FormRenderer
-          definition={definition as any}
-          mode="new"
-          onSubmit={async () => {
-            alert("Submitted in minimal example");
-          }}
-        />
-      )}
-    </main>
+  useEffect(() => {
+    void (async () => {
+      try {
+        await api("/dev/login", {
+          method: "POST",
+          body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+        });
+        const created = await api<{ formId: string; draftRevision: number }>("/api/forms", {
+          method: "POST",
+          body: JSON.stringify({
+            name: `Minimal ${new Date().toISOString()}`,
+            description: "Minimal example form",
+            definition
+          })
+        });
+        setFormId(created.formId);
+        setDraftRevision(created.draftRevision);
+        setStatus(`Created ${created.formId}`);
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Unable to connect");
+      }
+    })();
+  }, []);
+
+  const customTheme = createTheme({
+    palette: {
+      mode: "light",
+      primary: { main: "#0b57d0" },
+      secondary: { main: "#00695f" },
+      background: { default: "#f7f9fc", paper: "#ffffff" }
+    },
+    typography: {
+      fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif",
+      h4: { fontWeight: 700 }
+    },
+    components: {
+      MuiButton: {
+        defaultProps: { disableElevation: true },
+        styleOverrides: { root: { borderRadius: 10, textTransform: "none" } }
+      },
+      MuiPaper: {
+        styleOverrides: { root: { borderRadius: 14 } }
+      }
+    }
+  });
+
+  const content = (
+    <Box component="main" sx={{ maxWidth: 1100, margin: "0 auto", p: 2.5 }}>
+      <Typography variant="h4" component="h1">Minimal integration example</Typography>
+      <Typography variant="body1" sx={{ mt: 1 }}>Uses shared packages with real backend draft/publish/submit behavior.</Typography>
+      <Typography aria-live="polite" variant="body2" color="text.secondary" sx={{ mt: 1 }}>{status}</Typography>
+      <Stack direction="row" spacing={1} sx={{ mt: 1.5, mb: 2 }}>
+        <Button type="button" variant={mode === "builder" ? "contained" : "outlined"} onClick={() => setMode("builder")}>Builder</Button>
+        <Button type="button" variant={mode === "renderer" ? "contained" : "outlined"} onClick={() => setMode("renderer")}>Renderer</Button>
+        <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
+          {useCustomTheme ? "Custom theme on" : "Stock MUI theme"}
+        </Button>
+      </Stack>
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        {mode === "builder" ? (
+          <FormBuilder
+            initialDefinition={definition}
+            onSaveDraft={async (nextDefinition) => {
+              if (!formId) {
+                throw new Error("Form is not connected yet");
+              }
+              const saved = await api<{ revision: number }>(`/api/forms/${formId}/draft`, {
+                method: "PUT",
+                body: JSON.stringify({ expectedRevision: draftRevision, definition: nextDefinition })
+              });
+              setDraftRevision(saved.revision);
+              setStatus(`Draft saved r${saved.revision}`);
+            }}
+            onPublish={async (nextDefinition) => {
+              if (!formId) {
+                throw new Error("Form is not connected yet");
+              }
+              const saved = await api<{ revision: number }>(`/api/forms/${formId}/draft`, {
+                method: "PUT",
+                body: JSON.stringify({ expectedRevision: draftRevision, definition: nextDefinition })
+              });
+              const published = await api<{ definitionId: string; publicationVersion: number }>(`/api/forms/${formId}/publish`, {
+                method: "POST",
+                body: JSON.stringify({ expectedRevision: saved.revision })
+              });
+              setDraftRevision(saved.revision);
+              setDefinitionId(published.definitionId);
+              setStatus(`Published v${published.publicationVersion}`);
+            }}
+          />
+        ) : (
+          <FormRenderer
+            definition={definition}
+            mode="new"
+            onSubmit={async (values) => {
+              if (!formId || !definitionId) {
+                throw new Error("Publish before submit");
+              }
+              const result = await api<{ recordId: string }>("/api/records", {
+                method: "POST",
+                headers: {
+                  "idempotency-key": crypto.randomUUID()
+                },
+                body: JSON.stringify({ formId, definitionId, values })
+              });
+              setStatus(`Submitted ${result.recordId}`);
+            }}
+          />
+        )}
+      </Paper>
+    </Box>
   );
+
+  if (useCustomTheme) {
+    return (
+      <ThemeProvider theme={customTheme}>
+        <CssBaseline />
+        {content}
+      </ThemeProvider>
+    );
+  }
+
+  return content;
 }

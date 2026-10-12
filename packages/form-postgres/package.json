@@ -16,6 +16,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "db:migrate": "node dist/migrate.js",
+    "db:migrate:status": "node dist/migrate-status.js",
     "db:seed": "node dist/seed.js"
   },
   "dependencies": {

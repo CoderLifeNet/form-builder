@@ -18,7 +18,7 @@
     "typecheck": "npm run typecheck -ws --if-present",
     "pack:artifacts": "rm -rf tmp/packs && mkdir -p tmp/packs && npm pack -w @coderlifenet/form-core --pack-destination tmp/packs && npm pack -w @coderlifenet/form-postgres --pack-destination tmp/packs && npm pack -w @coderlifenet/form-server --pack-destination tmp/packs && npm pack -w @coderlifenet/form-react --pack-destination tmp/packs && npm pack -w @coderlifenet/form-builder --pack-destination tmp/packs",
     "verify:consumer": "npm run verify -w consumer-smoke",
-    "dev:infra": "docker compose up -d postgres localstack localstack-init",
+    "dev:infra": "docker compose up -d postgres",
     "dev:infra:down": "docker compose down -v",
     "db:migrate": "npm run db:migrate -w @coderlifenet/form-postgres",
     "db:seed": "npm run db:seed -w @coderlifenet/form-postgres"

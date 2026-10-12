@@ -1,21 +1,91 @@
-import { useMemo, useState } from "react";
-import { FormBuilder, FormManager, ManagedForm } from "@coderlifenet/form-builder";
-import { FormRenderer } from "@coderlifenet/form-react";
+import { useEffect, useMemo, useState } from "react";
+import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder";
+import { FormRenderer, RecordHistoryView } from "@coderlifenet/form-react";
+import type { FormDefinition } from "@coderlifenet/form-core";
+import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
-const defaultDefinition = {
+type View = "manager" | "builder" | "capture" | "history";
+
+type ApiForm = {
+  id: string;
+  name: string;
+  description: string | null;
+  archived: boolean;
+  draftRevision: number | null;
+  publishedVersion: number | null;
+  publishedDefinitionId: string | null;
+};
+
+type ApiDraft = {
+  revision: number;
+  definition: FormDefinition;
+};
+
+type ApiDefinition = {
+  id: string;
+  formId: string;
+  publicationVersion: number;
+  definition: FormDefinition;
+};
+
+type ApiRecordRevision = {
+  id: string;
+  revisionNumber: number;
+  definitionId: string;
+  values: Record<string, unknown>;
+  createdAt: string;
+};
+
+const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://localhost:4010";
+
+const starterDefinition: FormDefinition = {
   metadata: {
     formId: "workspace-demo",
     name: "Workspace service request",
-    description: "Parent default form"
+    description: "Parent default form",
+    schemaVersion: "1.0.0"
   },
   sections: [
     { id: "s1", title: "Details", order: 0 },
     { id: "s2", title: "Request", order: 1 }
   ],
   fields: [
-    { id: "f1", key: "first_name", type: "text", label: "First name", sectionId: "s1", row: 0, width: 6, required: true, rules: [] },
-    { id: "f2", key: "last_name", type: "text", label: "Last name", sectionId: "s1", row: 0, width: 6, required: true, rules: [] },
-    { id: "f3", key: "title", type: "text", label: "Request title", sectionId: "s2", row: 0, width: 12, required: true, rules: [] }
+    {
+      id: "field_first_name",
+      key: "field_first_name",
+      type: "text",
+      label: "First name",
+      sectionId: "s1",
+      row: 0,
+      width: 6,
+      required: true,
+      rules: [],
+      source: { id: "profile.first_name", version: "1", mode: "display_only" }
+    },
+    {
+      id: "field_last_name",
+      key: "field_last_name",
+      type: "text",
+      label: "Last name",
+      sectionId: "s1",
+      row: 0,
+      width: 6,
+      required: true,
+      rules: [],
+      source: { id: "profile.last_name", version: "1", mode: "display_only" }
+    },
+    {
+      id: "field_title",
+      key: "field_title",
+      type: "text",
+      label: "Request title",
+      sectionId: "s2",
+      row: 0,
+      width: 12,
+      required: true,
+      validation: { minLength: 4 },
+      rules: []
+    }
   ],
   dependencyVersions: {
     "profile.first_name": "1",
@@ -23,134 +93,316 @@ const defaultDefinition = {
   }
 };
 
-const seedForms: ManagedForm[] = [
-  {
-    id: "form_workspace_default",
-    name: "Workspace default",
-    archived: false,
-    hasDraft: true,
-    publishedVersion: 1,
-    definition: defaultDefinition as any
-  },
-  {
-    id: "form_project_override",
-    name: "Project override",
-    archived: false,
-    hasDraft: false,
-    publishedVersion: 2,
-    definition: defaultDefinition as any
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${apiBase}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {})
+    }
+  });
+
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({ message: response.statusText }));
+    throw new Error(body.message ?? `Request failed: ${response.status}`);
   }
-];
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
 
 export function App(): JSX.Element {
-  const [view, setView] = useState<"manager" | "builder" | "capture">("manager");
-  const [forms, setForms] = useState<ManagedForm[]>(seedForms);
-  const [activeId, setActiveId] = useState(seedForms[0].id);
+  const [view, setView] = useState<View>("manager");
+  const [useCustomTheme, setUseCustomTheme] = useState(false);
+  const [forms, setForms] = useState<ApiForm[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeDraft, setActiveDraft] = useState<ApiDraft | null>(null);
+  const [activeDefinition, setActiveDefinition] = useState<ApiDefinition | null>(null);
+  const [recordHistory, setRecordHistory] = useState<ApiRecordRevision[]>([]);
+  const [historyDefinitions, setHistoryDefinitions] = useState<Record<string, FormDefinition>>({});
+  const [lastRecordId, setLastRecordId] = useState<string>("");
+  const [status, setStatus] = useState<string>("Connecting...");
 
-  const active = useMemo(() => forms.find((form) => form.id === activeId) ?? forms[0], [forms, activeId]);
+  const managerForms: ManagedForm[] = useMemo(
+    () =>
+      forms.map((form) => ({
+        id: form.id,
+        name: form.name,
+        description: form.description ?? undefined,
+        archived: form.archived,
+        publishedVersion: form.publishedVersion ?? undefined,
+        hasDraft: form.draftRevision !== null,
+        definition: activeDraft?.definition ?? starterDefinition
+      })),
+    [forms, activeDraft]
+  );
 
-  return (
-    <main style={{ maxWidth: 1200, margin: "0 auto", padding: 20 }}>
-      <h1>Workspace/project host example</h1>
-      <p>
-        Demonstrates parent defaults, project override, and protected profile-bound fields. Development identity is selected by
-        host headers in the service layer.
-      </p>
-      <nav style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button type="button" onClick={() => setView("manager")}>Manager</button>
-        <button type="button" onClick={() => setView("builder")}>Builder</button>
-        <button type="button" onClick={() => setView("capture")}>Capture</button>
-      </nav>
+  useEffect(() => {
+    void (async () => {
+      try {
+        await api("/dev/login", {
+          method: "POST",
+          body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+        });
+        setStatus("Connected as owner1");
+        await refreshForms();
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Unable to connect");
+      }
+    })();
+  }, []);
 
-      {view === "manager" ? (
-        <FormManager
-          forms={forms}
-          onOpenBuilder={(formId) => {
-            setActiveId(formId);
-            setView("builder");
-          }}
-          onDuplicate={(formId) => {
-            const source = forms.find((form) => form.id === formId);
-            if (!source) {
+  async function refreshForms(): Promise<void> {
+    const next = await api<ApiForm[]>("/api/forms?includeArchived=true");
+    setForms(next);
+    if (!activeId && next.length > 0) {
+      setActiveId(next[0].id);
+    }
+  }
+
+  async function openBuilder(formId: string): Promise<void> {
+    const draft = await api<ApiDraft>(`/api/forms/${formId}/draft`);
+    setActiveId(formId);
+    setActiveDraft(draft);
+    setView("builder");
+  }
+
+  async function openCapture(formId: string): Promise<void> {
+    const form = await api<ApiForm>(`/api/forms/${formId}`);
+    if (!form.publishedDefinitionId) {
+      setStatus("Publish the form before capture.");
+      return;
+    }
+    const definition = await api<ApiDefinition>(`/api/definitions/${form.publishedDefinitionId}`);
+    setActiveId(formId);
+    setActiveDefinition(definition);
+    setView("capture");
+  }
+
+  async function createForm(): Promise<void> {
+    const created = await api<{ formId: string }>("/api/forms", {
+      method: "POST",
+      body: JSON.stringify({
+        name: `Form ${new Date().toISOString()}`,
+        description: "Created from workspace example",
+        definition: starterDefinition
+      })
+    });
+    await refreshForms();
+    await openBuilder(created.formId);
+  }
+
+  const customTheme = createTheme({
+    palette: {
+      mode: "light",
+      primary: { main: "#0050b3" },
+      secondary: { main: "#2e7d32" },
+      background: { default: "#f6f9ff" }
+    },
+    typography: {
+      fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif",
+      h4: { fontWeight: 700 },
+      h5: { fontWeight: 700 }
+    },
+    components: {
+      MuiButton: {
+        styleOverrides: { root: { borderRadius: 10, textTransform: "none" } }
+      },
+      MuiPaper: {
+        styleOverrides: { root: { borderRadius: 14 } }
+      }
+    }
+  });
+
+  const content = (
+    <Box component="main" sx={{ maxWidth: 1200, margin: "0 auto", p: 2.5 }}>
+      <Typography variant="h4" component="h1">Workspace/project host example</Typography>
+      <Typography variant="body1" sx={{ mt: 1 }}>
+        Real API integration for manager, builder, publish, capture, history, archive, import and export.
+      </Typography>
+      <Typography aria-live="polite" variant="body2" color="text.secondary" sx={{ mt: 1 }}>{status}</Typography>
+      <Stack direction="row" spacing={1} sx={{ mt: 1.5, mb: 2 }}>
+        <Button type="button" variant={view === "manager" ? "contained" : "outlined"} onClick={() => setView("manager")}>Manager</Button>
+        <Button type="button" variant={view === "builder" ? "contained" : "outlined"} onClick={() => activeId && openBuilder(activeId)}>Builder</Button>
+        <Button type="button" variant={view === "capture" ? "contained" : "outlined"} onClick={() => activeId && openCapture(activeId)}>Capture</Button>
+        <Button
+          type="button"
+          variant={view === "history" ? "contained" : "outlined"}
+          onClick={async () => {
+            if (!lastRecordId) {
+              setStatus("Submit a record first.");
               return;
             }
-            setForms((prev) => [
-              ...prev,
-              {
-                ...source,
-                id: `copy_${Date.now()}`,
-                name: `${source.name} copy`,
-                hasDraft: true,
-                publishedVersion: undefined,
-                archived: false
-              }
-            ]);
-          }}
-          onExport={() => {
-            // Example only: full export/import lives in package API and server endpoints.
-          }}
-          onArchiveToggle={(formId) => {
-            setForms((prev) =>
-              prev.map((form) => (form.id === formId ? { ...form, archived: !form.archived } : form))
+            const revisions = await api<ApiRecordRevision[]>(`/api/records/${lastRecordId}/history`);
+            const uniqueDefinitionIds = [...new Set(revisions.map((item) => item.definitionId))];
+            const definitions = await Promise.all(
+              uniqueDefinitionIds.map(async (definitionId) => {
+                const definition = await api<ApiDefinition>(`/api/definitions/${definitionId}`);
+                return [definitionId, definition.definition] as const;
+              })
             );
+            setHistoryDefinitions(Object.fromEntries(definitions));
+            setRecordHistory(revisions);
+            setView("history");
           }}
-          onImportAsNew={() => {
-            setForms((prev) => [
-              ...prev,
-              {
-                id: `imported_${Date.now()}`,
-                name: "Imported draft",
-                archived: false,
-                hasDraft: true,
-                definition: defaultDefinition as any
-              }
-            ]);
-          }}
-        />
-      ) : null}
+        >
+          History
+        </Button>
+        <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
+          {useCustomTheme ? "Custom theme on" : "Stock MUI theme"}
+        </Button>
+      </Stack>
 
-      {view === "builder" ? (
-        <FormBuilder
-          initialDefinition={active.definition as any}
-          onSaveDraft={async (definition) => {
-            setForms((prev) =>
-              prev.map((form) =>
-                form.id === active.id
-                  ? {
-                      ...form,
-                      definition: definition as any,
-                      hasDraft: true
-                    }
-                  : form
-              )
-            );
-          }}
-          onPublish={async (definition) => {
-            setForms((prev) =>
-              prev.map((form) =>
-                form.id === active.id
-                  ? {
-                      ...form,
-                      definition: definition as any,
-                      hasDraft: false,
-                      publishedVersion: (form.publishedVersion ?? 0) + 1
-                    }
-                  : form
-              )
-            );
-          }}
-        />
-      ) : null}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        {view === "manager" ? (
+          <FormManager
+            forms={managerForms}
+            onCreateForm={() => {
+              void createForm();
+            }}
+            onOpenBuilder={(formId) => {
+              void openBuilder(formId);
+            }}
+            onDuplicate={(formId) => {
+              void (async () => {
+                await api(`/api/forms/${formId}/duplicate`, { method: "POST" });
+                await refreshForms();
+                setStatus("Form duplicated");
+              })();
+            }}
+            onExport={(formId) => {
+              void (async () => {
+                const exported = await api<{ definition: FormDefinition; dependencies: Record<string, string> }>(`/api/forms/${formId}/export`);
+                const blob = new Blob([exportDefinition(exported.definition)], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement("a");
+                link.href = url;
+                link.download = `form-${formId}.json`;
+                link.click();
+                URL.revokeObjectURL(url);
+                setStatus("Form exported");
+              })();
+            }}
+            onArchiveToggle={(formId) => {
+              void (async () => {
+                const target = forms.find((form) => form.id === formId);
+                if (!target) {
+                  return;
+                }
+                await api(`/api/forms/${formId}/${target.archived ? "restore" : "archive"}`, { method: "POST" });
+                await refreshForms();
+                setStatus(target.archived ? "Form restored" : "Form archived");
+              })();
+            }}
+            onImportAsNew={() => {
+              void (async () => {
+                const input = window.prompt("Paste exported form JSON");
+                if (!input) {
+                  return;
+                }
+                const imported = importDefinition(input);
+                await api("/api/forms/import-as-new", {
+                  method: "POST",
+                  body: JSON.stringify({
+                    name: `${imported.metadata.name} imported`,
+                    description: imported.metadata.description,
+                    envelope: { formatVersion: 1, definition: imported, dependencies: imported.dependencyVersions }
+                  })
+                });
+                await refreshForms();
+                setStatus("Form imported");
+              })();
+            }}
+          />
+        ) : null}
 
-      {view === "capture" ? (
-        <FormRenderer
-          definition={active.definition as any}
-          mode="new"
-          onSubmit={async () => {
-            alert("Submitted in workspace example");
-          }}
-        />
-      ) : null}
-    </main>
+        {view === "builder" && activeDraft && activeId ? (
+          <FormBuilder
+            initialDefinition={activeDraft.definition}
+            onSaveDraft={async (nextDefinition) => {
+              const saved = await api<{ revision: number }>(`/api/forms/${activeId}/draft`, {
+                method: "PUT",
+                body: JSON.stringify({ expectedRevision: activeDraft.revision, definition: nextDefinition })
+              });
+              setActiveDraft({ revision: saved.revision, definition: nextDefinition });
+              await refreshForms();
+              setStatus(`Draft saved r${saved.revision}`);
+            }}
+            onPublish={async (nextDefinition) => {
+              const saved = await api<{ revision: number }>(`/api/forms/${activeId}/draft`, {
+                method: "PUT",
+                body: JSON.stringify({ expectedRevision: activeDraft.revision, definition: nextDefinition })
+              });
+              const published = await api<{ definitionId: string; publicationVersion: number }>(`/api/forms/${activeId}/publish`, {
+                method: "POST",
+                body: JSON.stringify({ expectedRevision: saved.revision })
+              });
+              setActiveDraft({ revision: saved.revision, definition: nextDefinition });
+              await refreshForms();
+              setStatus(`Published v${published.publicationVersion}`);
+            }}
+          />
+        ) : null}
+
+        {view === "capture" && activeDefinition && activeId ? (
+          <FormRenderer
+            definition={activeDefinition.definition}
+            mode="new"
+            onSubmit={async (values) => {
+              const result = await api<{ recordId: string }>("/api/records", {
+                method: "POST",
+                headers: {
+                  "idempotency-key": crypto.randomUUID()
+                },
+                body: JSON.stringify({
+                  formId: activeId,
+                  definitionId: activeDefinition.id,
+                  values
+                })
+              });
+              setLastRecordId(result.recordId);
+              setStatus(`Record saved: ${result.recordId}`);
+            }}
+            sourceResolver={async (sourceId) => {
+              if (sourceId === "profile.first_name") {
+                return "Owner";
+              }
+              if (sourceId === "profile.last_name") {
+                return "User";
+              }
+              return undefined;
+            }}
+          />
+        ) : null}
+
+        {view === "history" && recordHistory.length > 0 && activeDefinition ? (
+          <RecordHistoryView
+            definition={activeDefinition.definition}
+            revisions={recordHistory.map((item) => ({
+              id: item.id,
+              revisionNumber: item.revisionNumber,
+              savedAt: item.createdAt,
+              values: item.values,
+              definition: historyDefinitions[item.definitionId]
+            }))}
+          />
+        ) : null}
+      </Paper>
+    </Box>
   );
+
+  if (useCustomTheme) {
+    return (
+      <ThemeProvider theme={customTheme}>
+        <CssBaseline />
+        {content}
+      </ThemeProvider>
+    );
+  }
+
+  return content;
 }
