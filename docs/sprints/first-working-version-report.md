@@ -12,6 +12,7 @@ This pass focused on unfinished acceptance IDs A04/A09/A12/A13/A15/A16/A18/A19/A
 
 Implemented and verified in this pass:
 
+- Restored host-owned analytics extension wiring in both example hosts (`UIExtensionsProvider` + host runtime/adapter) from the preserved pre-switch stash.
 - Renderer recovery/error-path coverage for session-expired and permission-revoked responses, plus pending-submit duplicate suppression.
 - Renderer option-refresh continuity coverage to assert saved selection preservation and non-reapplication of defaults during refresh paths.
 - Upload UI coverage for retry and cancellation behavior in addition to existing multi-file persistence checks.
@@ -29,7 +30,9 @@ Implemented and verified in this pass:
 | `npm run typecheck` | PASS across workspace packages and both example apps. |
 | `npm test` | PASS in default fixture/mock profile; DB integration suites intentionally skipped without `FORM_RUN_DB_TESTS=true`. |
 | `env -u FORM_TEST_DB_URL npm run test:integration` | Expected refusal (exit 1): dedicated `FORM_TEST_DB_URL` is required and `FORM_DB_URL` is ignored by design. |
-| `npm run test:browser` | PASS: 12 Playwright checks across desktop + narrow viewports, WCAG tags, keyboard traversal, responsive overflow checks, and history keyboard operability. |
+| `npm run test:browser` | PASS: 14 Playwright checks across desktop + narrow viewports, WCAG tags, keyboard action/outcome checks, popup focus-restore verification, responsive overflow checks, and history keyboard operability. |
+| `npm run pack:artifacts` | PASS: fresh tarballs produced for all runtime packages. |
+| `npm run verify:consumer` | PASS: isolated consumer fixture install verified packed artifacts with exact registry UI dependency pair and runtime checks. |
 
 ### Acceptance delta for requested unfinished IDs
 
@@ -37,13 +40,30 @@ Implemented and verified in this pass:
 | --- | --- | --- |
 | A04 | PARTIAL | Trusted source resolution and stale-option continuity are covered in renderer/server tests, including preserved saved selections during refresh; full dedicated DB-backed end-to-end execution remains pending. |
 | A09 | PARTIAL | Binding save/resolve/reset conflict behavior is now covered at server route level; native PostgreSQL integration execution remains pending in this environment. |
-| A12 | PASS | Conflict/recovery matrix improved with autosave serialization tests, stale async protection tests, 401/403 truthful recovery messaging, and pending-submit duplicate suppression. |
-| A13 | PASS | Upload restrictions/retry/cancel, attached-history deletion protection, and cleanup retry paths now have explicit coverage. |
+| A12 | PARTIAL | Implementation coverage improved (autosave serialization, stale async protection, 401/403 truthful recovery messaging, pending-submit duplicate suppression), but full acceptance still needs dedicated end-to-end conflict/session-expiry/recovery verification on native PostgreSQL flows. |
+| A13 | PARTIAL | Upload restrictions/retry/cancel, attached-history deletion protection, and cleanup retry behavior are covered in automated tests, but full acceptance still needs end-to-end storage lifecycle verification against dedicated integration infrastructure. |
 | A15 | PARTIAL | Publish blocking on unresolved capability dependencies is covered; full replacement-import reconciliation flow with dedicated DB integration run remains pending. |
 | A16 | PASS | Malformed/unsafe/oversized import paths and unsafe pattern validation are now explicitly enforced and tested. |
-| A18 | PASS | Archive/restore plus authorized retention/erasure cleanup and failure-retry behavior are now covered by server tests. |
+| A18 | PARTIAL | Archive/restore and retention/erasure cleanup/retry logic are implemented and covered in server tests, but full retention-policy and multi-stage erasure lifecycle verification remains pending in dedicated integration runs. |
 | A19 | PARTIAL | Sequential upgrade tests exist but still require execution with dedicated `FORM_TEST_DB_URL`; native PostgreSQL multi-connection concurrency verification remains outstanding. |
-| A21 | PASS | Automated WCAG + keyboard + responsive checks now run in browser automation across manager/builder/capture/history in desktop and narrow viewports. Human accessibility review remains pending by definition. |
+| A21 | PARTIAL | Automated WCAG + keyboard + responsive checks now run in browser automation across manager/builder/capture/history in desktop and narrow viewports (including focused keyboard action/outcome checks), but human accessibility review remains pending by definition. |
+
+### Preserved pre-switch stash audit (`stash@{0}`)
+
+Stash `wip-before-ui-0.2-integration-switch` is intentionally retained and not dropped.
+
+| File | Decision | Reconciliation note |
+| --- | --- | --- |
+| `apps/example-minimal/src/App.tsx` | INTEGRATED | Restored host-owned analytics extension wiring (`UIExtensionsProvider` + runtime/adapter) from stash while preserving current branch API and publish/submit behavior. |
+| `apps/example-workspace/src/App.tsx` | INTEGRATED | Restored host-owned analytics extension wiring from stash while preserving current manager/builder/capture/history flow and API behavior. |
+| `docs/sprints/first-working-version-report.md` | SUPERSEDED | Stash status text predated current deterministic test fixes and reconciliation; this report now supersedes that text with explicit implementation-vs-verification status. |
+| `packages/form-builder/README.md` | SUPERSEDED | Stash callback names (`onDirtyStateChange`, `onManualSaveSuccess`, `onReloadDraftAfterConflict`) no longer match the current exported API contract (`onSaved`, `onReloadDraft`, `onDefinitionChange`). |
+| `packages/form-builder/src/index.tsx` | SUPERSEDED | Stash embedded analytics/accessibility schema editors and alternate callback contract were replaced by current tracking/accessibility editors and save queue contract already used by examples/tests. |
+| `packages/form-core/src/index.test.ts` | SUPERSEDED | Stash tests targeted the older analytics-schema variant; current tests align with the active tracking/accessibility schema used across renderer/builder/server. |
+| `packages/form-core/src/index.ts` | SUPERSEDED | Stash introduced `analytics` shape that diverges from current `tracking` contract and would break compatibility with current builder/renderer/server assumptions. |
+| `packages/form-react/README.md` | SUPERSEDED | Stash docs reflected older analytics payload wiring; current runtime is boundary-based tracking with content-free events and deterministic stale-source handling. |
+| `packages/form-react/src/index.tsx` | SUPERSEDED | Stash local semantic-event emission path diverges from current tracking contract and would regress recent source-refresh/pending-submit/recovery logic coverage. |
+| `packages/form-server/src/definition-engine.ts` | SUPERSEDED (already landed) | Stash import-hardening intent is already present in branch code (`IMPORT_TOO_LARGE` plus safe input checks); no additional delta remained to integrate. |
 
 ## Continuation: test profiles and record-save recovery (2026-10-13)
 

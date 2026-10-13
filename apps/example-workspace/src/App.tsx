@@ -3,6 +3,8 @@ import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefiniti
 import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView } from "@coderlifenet/form-react";
 import type { FormDefinition } from "@coderlifenet/form-core";
 import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
+import { createAnalyticsRuntime, createMemoryAdapter } from "@coderlifenet/ui-core/analytics";
+import { UIExtensionsProvider, createAnalyticsExtension } from "@coderlifenet/ui-core/extensions";
 
 type View = "manager" | "builder" | "capture" | "history";
 
@@ -98,6 +100,15 @@ const api = createFormApiClient({ baseUrl: apiBase });
 
 export function App(): ReactElement {
   const submissionKey = useRef(createMutationRetryKey());
+  const memoryAdapter = useMemo(() => createMemoryAdapter(), []);
+  const analyticsRuntime = useMemo(() => createAnalyticsRuntime([memoryAdapter], {
+    enabled: true,
+    consent: {
+      analyticsStorage: "granted",
+      adStorage: "denied"
+    }
+  }), [memoryAdapter]);
+  const extensions = useMemo(() => [createAnalyticsExtension(analyticsRuntime)], [analyticsRuntime]);
   const [sourceCapabilities, setSourceCapabilities] = useState<Record<string, string>>({});
   const [view, setView] = useState<View>("manager");
   const [useCustomTheme, setUseCustomTheme] = useState(false);
@@ -405,12 +416,14 @@ export function App(): ReactElement {
 
   if (useCustomTheme) {
     return (
-      <ThemeProvider theme={customTheme}>
-        <CssBaseline />
-        {content}
-      </ThemeProvider>
+      <UIExtensionsProvider initialConfig={{ enabled: true, debug: false }} extensions={extensions}>
+        <ThemeProvider theme={customTheme}>
+          <CssBaseline />
+          {content}
+        </ThemeProvider>
+      </UIExtensionsProvider>
     );
   }
 
-  return content;
+  return <UIExtensionsProvider initialConfig={{ enabled: true, debug: false }} extensions={extensions}>{content}</UIExtensionsProvider>;
 }

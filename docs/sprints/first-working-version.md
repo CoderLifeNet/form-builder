@@ -93,8 +93,9 @@ save/replay persistence. Normal tests now use fixtures/mocks only. Dedicated
 SQL/API tests require the explicit integration command and `FORM_TEST_DB_URL`.
 The report now distinguishes default-profile evidence from outstanding native
 PostgreSQL coverage. All nine previously partial acceptance IDs were revisited
-in this branch. A12/A13/A16/A18/A21 now have direct
-automated evidence in default test/browser profiles. A04/A09/A15/A19 still
-require dedicated native-PostgreSQL integration execution (`FORM_TEST_DB_URL`)
-to close with full end-to-end confidence, and native PostgreSQL concurrency
-verification remains explicitly outstanding.
+in this branch. A12/A13/A16/A18/A21 have stronger automated evidence in default
+test/browser profiles; however, A12/A13/A18/A21 remain partial until their full
+end-to-end acceptance criteria are verified. A04/A09/A15/A19 still require
+dedicated native-PostgreSQL integration execution (`FORM_TEST_DB_URL`) to close
+with full end-to-end confidence, and native PostgreSQL concurrency verification
+remains explicitly outstanding.

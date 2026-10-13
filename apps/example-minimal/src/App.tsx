@@ -1,8 +1,10 @@
-import { useEffect, useState, useRef, type ReactElement } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactElement } from "react";
 import { FormBuilder } from "@coderlifenet/form-builder";
 import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer } from "@coderlifenet/form-react";
 import type { FormDefinition } from "@coderlifenet/form-core";
 import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
+import { createAnalyticsRuntime, createMemoryAdapter } from "@coderlifenet/ui-core/analytics";
+import { UIExtensionsProvider, createAnalyticsExtension } from "@coderlifenet/ui-core/extensions";
 
 const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://localhost:4010";
 
@@ -60,6 +62,15 @@ const api = createFormApiClient({ baseUrl: apiBase });
 
 export function App(): ReactElement {
   const submissionKey = useRef(createMutationRetryKey());
+  const memoryAdapter = useMemo(() => createMemoryAdapter(), []);
+  const analyticsRuntime = useMemo(() => createAnalyticsRuntime([memoryAdapter], {
+    enabled: true,
+    consent: {
+      analyticsStorage: "granted",
+      adStorage: "denied"
+    }
+  }), [memoryAdapter]);
+  const extensions = useMemo(() => [createAnalyticsExtension(analyticsRuntime)], [analyticsRuntime]);
   const [definition, setDefinition] = useState(starterDefinition);
   const [publishedDefinition, setPublishedDefinition] = useState<FormDefinition | null>(null);
   const [mode, setMode] = useState<"builder" | "renderer">("builder");
@@ -200,12 +211,14 @@ export function App(): ReactElement {
 
   if (useCustomTheme) {
     return (
-      <ThemeProvider theme={customTheme}>
-        <CssBaseline />
-        {content}
-      </ThemeProvider>
+      <UIExtensionsProvider initialConfig={{ enabled: true, debug: false }} extensions={extensions}>
+        <ThemeProvider theme={customTheme}>
+          <CssBaseline />
+          {content}
+        </ThemeProvider>
+      </UIExtensionsProvider>
     );
   }
 
-  return content;
+  return <UIExtensionsProvider initialConfig={{ enabled: true, debug: false }} extensions={extensions}>{content}</UIExtensionsProvider>;
 }
