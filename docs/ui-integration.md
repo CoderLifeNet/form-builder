@@ -16,8 +16,16 @@ catalog. The external consumer checks it against the actual installed catalog.
 Both example `AnalyticsHost.tsx` files demonstrate a single host-owned runtime,
 memory adapter and `UIExtensionsProvider`. Delivery starts disabled, with consent
 denied. Enablement and consent controls update the existing runtime. Embedded
-builders/renderers never create an additional provider. A host may provide its
+builders/renderers never create an additional provider; both `App.tsx` files
+intentionally rely on the outer host composition from `main.tsx`.
+A host may provide its
 own MUI theme; shared components do not install another theme or global reset.
+
+`apps/example-minimal/src/analytics-host.test.tsx` verifies the real
+`<AnalyticsHost><App /></AnalyticsHost>` composition for delivery/consent gating:
+disabled delivery blocks events, enabled+denied consent blocks events,
+enabled+granted consent delivers selected events, and revoking consent stops
+subsequent delivery.
 
 Persisted form/field configuration uses `tracking`:
 

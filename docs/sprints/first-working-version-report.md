@@ -12,7 +12,8 @@ This pass focused on unfinished acceptance IDs A04/A09/A12/A13/A15/A16/A18/A19/A
 
 Implemented and verified in this pass:
 
-- Restored host-owned analytics extension wiring in both example hosts (`UIExtensionsProvider` + host runtime/adapter) from the preserved pre-switch stash.
+- Removed duplicated App-level analytics providers in both examples so `AnalyticsHost` remains the single owner of runtime/adapter/consent controls/application boundary.
+- Added a host-composition regression check that mounts the actual `AnalyticsHost` + `App` composition and verifies: disabled delivery blocks events; enabled-with-denied-consent blocks events; enabled-with-granted-consent delivers selected events; revoking consent stops subsequent delivery.
 - Renderer recovery/error-path coverage for session-expired and permission-revoked responses, plus pending-submit duplicate suppression.
 - Renderer option-refresh continuity coverage to assert saved selection preservation and non-reapplication of defaults during refresh paths.
 - Upload UI coverage for retry and cancellation behavior in addition to existing multi-file persistence checks.
@@ -28,7 +29,7 @@ Implemented and verified in this pass:
 | `npm install` | PASS (local dependency restoration for test tooling). |
 | `npm run build -w @coderlifenet/form-core && npm run build -w @coderlifenet/form-postgres && npm run build -w @coderlifenet/form-server && npm run build -w @coderlifenet/form-react && npm run build -w @coderlifenet/form-builder` | PASS. |
 | `npm run typecheck` | PASS across workspace packages and both example apps. |
-| `npm test` | PASS in default fixture/mock profile; DB integration suites intentionally skipped without `FORM_RUN_DB_TESTS=true`. |
+| `npm test` | PASS in default fixture/mock profile; includes real host-composition analytics gating test in `apps/example-minimal` and deterministic cross-form async recovery coverage in renderer tests. DB integration suites remain intentionally skipped without `FORM_RUN_DB_TESTS=true`. |
 | `env -u FORM_TEST_DB_URL npm run test:integration` | Expected refusal (exit 1): dedicated `FORM_TEST_DB_URL` is required and `FORM_DB_URL` is ignored by design. |
 | `npm run test:browser` | PASS: 14 Playwright checks across desktop + narrow viewports, WCAG tags, keyboard action/outcome checks, popup focus-restore verification, responsive overflow checks, and history keyboard operability. |
 | `npm run pack:artifacts` | PASS: fresh tarballs produced for all runtime packages. |
@@ -38,9 +39,9 @@ Implemented and verified in this pass:
 
 | ID | Status after this pass | Evidence |
 | --- | --- | --- |
-| A04 | PARTIAL | Trusted source resolution and stale-option continuity are covered in renderer/server tests, including preserved saved selections during refresh; full dedicated DB-backed end-to-end execution remains pending. |
+| A04 | PARTIAL | Trusted source resolution and stale-option continuity are covered in renderer/server tests, including preserved saved selections during refresh and stale-response suppression; full dedicated DB-backed end-to-end execution remains pending. |
 | A09 | PARTIAL | Binding save/resolve/reset conflict behavior is now covered at server route level; native PostgreSQL integration execution remains pending in this environment. |
-| A12 | PARTIAL | Implementation coverage improved (autosave serialization, stale async protection, 401/403 truthful recovery messaging, pending-submit duplicate suppression), but full acceptance still needs dedicated end-to-end conflict/session-expiry/recovery verification on native PostgreSQL flows. |
+| A12 | PARTIAL | Implementation coverage improved (autosave serialization, stale async protection, cross-form in-flight switch isolation, 401/403 truthful recovery messaging, pending-submit duplicate suppression), but full acceptance still needs dedicated end-to-end conflict/session-expiry/recovery verification on native PostgreSQL flows. |
 | A13 | PARTIAL | Upload restrictions/retry/cancel, attached-history deletion protection, and cleanup retry behavior are covered in automated tests, but full acceptance still needs end-to-end storage lifecycle verification against dedicated integration infrastructure. |
 | A15 | PARTIAL | Publish blocking on unresolved capability dependencies is covered; full replacement-import reconciliation flow with dedicated DB integration run remains pending. |
 | A16 | PASS | Malformed/unsafe/oversized import paths and unsafe pattern validation are now explicitly enforced and tested. |
@@ -48,14 +49,41 @@ Implemented and verified in this pass:
 | A19 | PARTIAL | Sequential upgrade tests exist but still require execution with dedicated `FORM_TEST_DB_URL`; native PostgreSQL multi-connection concurrency verification remains outstanding. |
 | A21 | PARTIAL | Automated WCAG + keyboard + responsive checks now run in browser automation across manager/builder/capture/history in desktop and narrow viewports (including focused keyboard action/outcome checks), but human accessibility review remains pending by definition. |
 
+### Implementation-first reconciliation for remaining areas
+
+| Area | Implementation status | Verification status | Current blocker / next step |
+| --- | --- | --- | --- |
+| Source refresh | Implemented: cancel-safe option/value source refresh, stale-response suppression, unavailable saved selection preservation, explicit refresh controls. | Partially verified in renderer tests; dedicated DB-backed source workflows remain pending. | Needs dedicated SQL/API profile with source endpoint integration and selected-item lifecycle checks. |
+| Binding inheritance and pinning | Implemented at service/repository level: save/resolve/reset endpoints, optimistic revision guard, parent/pin semantics in persistence tests. | Partially verified in route/unit coverage; native PostgreSQL integration execution pending. | Requires dedicated DB integration run for concurrent binding update resolution. |
+| Cross-form async recovery | Implemented in renderer: cross-form identity reset prevents old in-flight source responses from leaking into the next form state. | Verified by deterministic renderer test (`prevents in-flight source results from a previous form from leaking after cross-form switch`). | No additional implementation blocker; broader end-to-end flow remains in integration profile scope. |
+| Upload/history cleanup | Implemented: upload attach/download, in-history deletion guard, retention cleanup queue and retry endpoint. | Partially verified in unit/route tests; live object-store and multi-stage retention lifecycle still pending. | Needs dedicated integration environment with storage lifecycle assertions beyond mock profile. |
+| Import dependency reconciliation | Implemented: unresolved dependency publish blocking and import hardening constraints. | Partially verified via server route tests and definition validation coverage. | Needs full import-replace reconciliation workflow verification with dedicated DB profile. |
+| Retention controls | Implemented baseline: queued deletion tracking, retryable cleanup path, archive/restore, upload-in-history protection. | Partially verified in route/unit tests. | Policy-level retention windows and full lifecycle assertions need dedicated integration execution. |
+| Upgrade/concurrency coverage | Implemented tests exist: sequential migration path and native concurrent idempotency retry case. | Not fully verified in this environment because dedicated PostgreSQL profile was not run here. | Requires `FORM_TEST_DB_URL` execution against dedicated native PostgreSQL for migration/concurrency closure. |
+| Accessibility requirements | Implemented automated WCAG + keyboard action/outcome checks including popup focus restore and keyboard builder movement. | Partially verified by Playwright + axe only. | Human accessibility review and richer assistive-technology/dialog coverage remain required. |
+
+### First consumer integration readiness (TrackForge-focused, engine-generic)
+
+Current blockers for first consumer integration:
+
+1. Dedicated native PostgreSQL verification (`FORM_TEST_DB_URL`) for binding resolution, migration upgrades, and concurrency retry behavior is still pending in this environment.
+2. End-to-end storage lifecycle validation (upload retention/cleanup across historical attachments) requires dedicated integration infrastructure beyond fixture mocks.
+3. Human accessibility review is still outstanding; automated checks alone are insufficient for release confidence.
+
+Safe deferrals that do not break the first-version contract:
+
+1. Richer dialog/accessibility scenario expansion beyond current keyboard/WCAG automation can follow first consumer onboarding.
+2. Additional source-pagination/search ergonomics can follow once dedicated integration verification is complete.
+3. Broader storage-provider hardening (beyond baseline private filesystem path and contract coverage) can follow first consumer rollout.
+
 ### Preserved pre-switch stash audit (`stash@{0}`)
 
 Stash `wip-before-ui-0.2-integration-switch` is intentionally retained and not dropped.
 
 | File | Decision | Reconciliation note |
 | --- | --- | --- |
-| `apps/example-minimal/src/App.tsx` | INTEGRATED | Restored host-owned analytics extension wiring (`UIExtensionsProvider` + runtime/adapter) from stash while preserving current branch API and publish/submit behavior. |
-| `apps/example-workspace/src/App.tsx` | INTEGRATED | Restored host-owned analytics extension wiring from stash while preserving current manager/builder/capture/history flow and API behavior. |
+| `apps/example-minimal/src/App.tsx` | SUPERSEDED | Stash-era App-level analytics provider wiring duplicated ownership already implemented in `AnalyticsHost`; removed to keep a single host-owned runtime/adapter/provider. |
+| `apps/example-workspace/src/App.tsx` | SUPERSEDED | Stash-era App-level analytics provider wiring duplicated ownership already implemented in `AnalyticsHost`; removed to keep a single host-owned runtime/adapter/provider. |
 | `docs/sprints/first-working-version-report.md` | SUPERSEDED | Stash status text predated current deterministic test fixes and reconciliation; this report now supersedes that text with explicit implementation-vs-verification status. |
 | `packages/form-builder/README.md` | SUPERSEDED | Stash callback names (`onDirtyStateChange`, `onManualSaveSuccess`, `onReloadDraftAfterConflict`) no longer match the current exported API contract (`onSaved`, `onReloadDraft`, `onDefinitionChange`). |
 | `packages/form-builder/src/index.tsx` | SUPERSEDED | Stash embedded analytics/accessibility schema editors and alternate callback contract were replaced by current tracking/accessibility editors and save queue contract already used by examples/tests. |

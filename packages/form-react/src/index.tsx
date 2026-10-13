@@ -71,6 +71,22 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
   const [sourceError, setSourceError] = useState("");
   const [refresh, setRefresh] = useState(0);
   const optionGeneration = useRef(0);
+  const definitionKeyRef = useRef(props.definition.metadata.formId);
+
+  useEffect(() => {
+    if (definitionKeyRef.current === props.definition.metadata.formId) return;
+    definitionKeyRef.current = props.definition.metadata.formId;
+    optionGeneration.current += 1;
+    pendingSubmission.current = false;
+    setSubmitting(false);
+    setValues(initializeValues(props.definition, props.initialValues));
+    setErrors(props.fieldErrors ?? {});
+    setSourceOptions({});
+    setSourceError("");
+    setFormError("");
+    setRefresh(0);
+  }, [props.definition, props.initialValues, props.fieldErrors]);
+
   const resolverRef = useRef(props.optionSourceResolver);
   resolverRef.current = props.optionSourceResolver;
   const dependencies = JSON.stringify(props.definition.fields.filter(f => f.source?.kind === "options").map(f => [f.id, f.source, (f.source?.dependsOn ?? []).map(id => values[id])]));

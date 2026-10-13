@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { render, screen, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { UIExtensionsProvider, TrackingBoundary, createAnalyticsExtension } from "@coderlifenet/ui-core/extensions";
@@ -8,6 +8,18 @@ import { createAnalyticsRuntime, createMemoryAdapter } from "@coderlifenet/ui-co
 import { validateDefinition } from "@coderlifenet/form-core";
 import { FormRenderer, RecordHistoryView } from "./index.js";
 const definition = validateDefinition({metadata:{formId:"f",name:"Example"}, tracking:{id:"form",events:["ui.text_field.change"],metadata:{surface:"capture"}}, sections:[{id:"s",title:"Details",order:0}], fields:[{id:"field",key:"field",label:"Name",type:"text",sectionId:"s",width:6,row:0,required:true,tracking:{id:"input",events:["ui.text_field.change"],semanticId:"name-control"},accessibility:{description:"Enter your name"}}]});
+beforeEach(() => {
+   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/dev/login") && init?.method === "POST") {
+         return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/api/forms") && init?.method === "POST") {
+         return new Response(JSON.stringify({ formId: "f_example", draftRevision: 1 }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+   }));
+});
 function deferred<T>() {
  let resolve!: (value: T) => void;
  let reject!: (reason?: unknown) => void;
@@ -18,6 +30,9 @@ function deferred<T>() {
  return { promise, resolve, reject };
 }
 afterEach(cleanup);
+afterEach(() => {
+   vi.restoreAllMocks();
+});
 describe("published ui-core integration",()=>{
  it("delivers one content-free event with scopes and semantic ID",async()=>{
   const events: any[]=[];
@@ -115,3 +130,36 @@ it("keeps saved single-select value and does not reapply defaults during option 
  await waitFor(()=>expect(screen.getByRole("combobox",{name:"Choice"}).textContent).toContain("Unavailable saved selection"));
  expect((document.querySelector("input.MuiSelect-nativeInput") as HTMLInputElement).value).toBe("saved");
 });
+
+it("prevents in-flight source results from a previous form from leaking after cross-form switch",async()=>{
+ const firstDefinition = validateDefinition({
+  metadata: { formId: "form_one", name: "Form One" },
+  sections: [{ id: "s1", title: "Section", order: 0 }],
+  fields: [{ id: "f1", key: "f1", type: "text", label: "Field One", sectionId: "s1", row: 0, width: 12, source: { id: "source_one", version: "1", mode: "display_only", kind: "value" } }]
+ });
+ const secondDefinition = validateDefinition({
+  metadata: { formId: "form_two", name: "Form Two" },
+  sections: [{ id: "s2", title: "Section", order: 0 }],
+  fields: [{ id: "f2", key: "f2", type: "text", label: "Field Two", sectionId: "s2", row: 0, width: 12, source: { id: "source_two", version: "1", mode: "display_only", kind: "value" } }]
+ });
+
+ let resolveFirst!: (value: unknown) => void;
+ const resolver = vi.fn(async (sourceId: string) => {
+  if (sourceId === "source_one") {
+   return await new Promise((resolve) => {
+    resolveFirst = resolve;
+   });
+  }
+  return "second-value";
+ });
+
+ const rendered = render(<FormRenderer definition={firstDefinition} mode="new" sourceResolver={resolver} />);
+ await waitFor(() => expect(resolver).toHaveBeenCalledWith("source_one", expect.any(Object), expect.any(AbortSignal)));
+
+ rendered.rerender(<FormRenderer definition={secondDefinition} mode="new" sourceResolver={resolver} />);
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Field Two" }) as HTMLInputElement).value).toBe("second-value"));
+
+ resolveFirst("first-value");
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Field Two" }) as HTMLInputElement).value).toBe("second-value"));
+});
+
