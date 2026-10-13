@@ -10,7 +10,7 @@ type TestIdentity = {
   tenantId: string;
 };
 
-const dbUrl = process.env.FORM_DB_URL;
+const dbUrl = process.env.FORM_RUN_DB_TESTS === "true" ? process.env.FORM_TEST_DB_URL : undefined;
 const integration = dbUrl ? describe : describe.skip;
 
 const allCapabilities = [

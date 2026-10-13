@@ -1,3 +1,4 @@
+export { createFormApiClient, createMutationRetryKey, FormRequestError } from "./client.js";
 import { FileField, type UploadHandler } from "./uploads.js";
 export { createHttpUploadHandler, type UploadHandler } from "./uploads.js";
 import { TrackingBoundary } from "@coderlifenet/ui-core/extensions";
@@ -47,6 +48,8 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
   const formHelpId = `${instanceId}-instructions`;
   const [values, setValues] = useState<Record<string, unknown>>(initializeValues(props.definition, props.initialValues));
   const [errors, setErrors] = useState<Record<string, string>>(props.fieldErrors ?? {});
+  const pendingSubmission = useRef(false);
+  const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string>("");
 
   useEffect(() => { setErrors(props.fieldErrors ?? {}); }, [props.fieldErrors]);
@@ -117,8 +120,13 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
     <Box
       component="form"
       noValidate
+      aria-busy={submitting}
       onSubmit={async (event) => {
         event.preventDefault();
+        if (pendingSubmission.current) return;
+        pendingSubmission.current = true;
+        setSubmitting(true);
+        try {
         let submittedValues = values;
 
         try {
@@ -155,7 +163,12 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
         } catch (error) {
           const fieldErrors = (error as { fieldErrors?: ValidationError[] })?.fieldErrors;
           if (Array.isArray(fieldErrors)) setErrors(fieldErrorsToMap(fieldErrors));
-          setFormError("Submission failed. Your entries are preserved.");
+          const status = (error as { status?: number })?.status;
+          setFormError(status === 401 ? "Your session expired. Sign in again; your entries are preserved." : status === 403 ? "Your permission changed. Your entries are preserved; request access before retrying." : "Submission failed. Your entries are preserved.");
+        }
+        } finally {
+          pendingSubmission.current = false;
+          setSubmitting(false);
         }
       }}
       aria-label={props.definition.accessibility?.label ?? props.definition.metadata.name}
@@ -178,7 +191,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                 }
 
                 const error = errors[field.id];
-                const disabled = !editable || state.disabled;
+                const disabled = !editable || state.disabled || submitting;
                 const readOnly = !editable || state.readonly;
                 const value = values[field.id];
 
@@ -305,7 +318,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
               </Box>
             </Box>
         ))}
-        {editable ? <Button type="submit" variant="contained">Submit</Button> : null}
+        {editable ? <Button type="submit" variant="contained" disabled={submitting}>{submitting ? "Submitting…" : "Submit"}</Button> : null}
       </Box>
     </TrackingBoundary>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, type ReactElement } from "react";
 import { FormBuilder } from "@coderlifenet/form-builder";
-import { createHttpUploadHandler, FormRenderer } from "@coderlifenet/form-react";
+import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer } from "@coderlifenet/form-react";
 import type { FormDefinition } from "@coderlifenet/form-core";
 import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
@@ -56,29 +56,10 @@ const starterDefinition: FormDefinition = {
   }
 };
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase}${path}`, {
-    ...init,
-    credentials: "include",
-    headers: {
-      "content-type": "application/json",
-      ...(init?.headers ?? {})
-    }
-  });
-
-  if (!response.ok) {
-    const body = await response.json().catch(() => ({ message: response.statusText }));
-    throw new Error(body.message ?? `Request failed: ${response.status}`);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return response.json() as Promise<T>;
-}
+const api = createFormApiClient({ baseUrl: apiBase });
 
 export function App(): ReactElement {
+  const submissionKey = useRef(createMutationRetryKey());
   const [definition, setDefinition] = useState(starterDefinition);
   const [publishedDefinition, setPublishedDefinition] = useState<FormDefinition | null>(null);
   const [mode, setMode] = useState<"builder" | "renderer">("builder");
@@ -200,13 +181,15 @@ export function App(): ReactElement {
               if (!formId || !definitionId) {
                 throw new Error("Publish before submit");
               }
+              const payload = JSON.stringify({ formId, definitionId, values, uploadIds: definition.fields.filter(field => field.type === "single_file" || field.type === "multi_file").flatMap(field => Array.isArray(values[field.id]) ? values[field.id] as string[] : values[field.id] ? [String(values[field.id])] : []) });
               const result = await api<{ recordId: string }>("/api/records", {
                 method: "POST",
                 headers: {
-                  "idempotency-key": crypto.randomUUID()
+                  "idempotency-key": submissionKey.current.keyFor(payload)
                 },
-                body: JSON.stringify({ formId, definitionId, values, uploadIds: definition.fields.filter(field => field.type === "single_file" || field.type === "multi_file").flatMap(field => Array.isArray(values[field.id]) ? values[field.id] as string[] : values[field.id] ? [String(values[field.id])] : []) })
+                body: payload
               });
+              submissionKey.current.committed();
               setStatus(`Submitted ${result.recordId}`);
             }}
           />

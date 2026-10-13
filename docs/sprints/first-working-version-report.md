@@ -4,6 +4,45 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: test profiles and record-save recovery (2026-10-13)
+
+Review: https://github.com/CoderLifeNet/form-builder/pull/1 (draft).
+
+Implemented typed browser API errors with field-error preservation, readable
+permission recovery, stable lost-response retry keys in both hosts and pending
+submission protection. Record mutation and its idempotent replay response now
+commit in the same transaction; actor ownership and tenant/form/definition/upload
+relationships are checked. Explicit migration remains the definition-change path.
+
+Normal tests never start or connect to a DB. SQL/API suites require
+`FORM_RUN_DB_TESTS=true` and `FORM_TEST_DB_URL`, set by the opt-in runner; the
+runtime `FORM_DB_URL` is ignored by those suites. The integration runner connects
+to an already-running dedicated test DB and does not launch Docker.
+
+| Command | Current result |
+| --- | --- |
+| `npm run build` | PASS. |
+| `npm run typecheck` | PASS. |
+| `npm test` | PASS: 31 fixture/mock tests; 11 database cases skipped. |
+| `env -u FORM_TEST_DB_URL npm run test:integration` | Expected refusal, exit 1; no database connection attempted. |
+| `npx playwright install chromium` then `npm run test:browser` | PASS: 10 isolated UI/keyboard/axe cases. Browser installation was needed after an initial missing-executable failure. |
+| `npm run pack:artifacts` | PASS. |
+| `npm run verify:consumer` | PASS: isolated packed install with exact registry UI pair, exports/catalog/types/SSR theme checks. |
+| `node /workspace/scratch/9507f17350ba/wasm-db/run.mjs` | Supplemental verification: migrations, 4 persistence and 6 API/database cases PASS using a temporary PGlite PostgreSQL socket and the real pg driver. Native multi-connection concurrency case explicitly skipped. Runner and portable DB packages are scratch tooling, not shipped dependencies. |
+| `git diff --check` | PASS. |
+
+Portable verification exercises real SQL and transactions with disposable fixture
+records, not production data. Its single PostgreSQL session is not native server
+concurrency evidence. Native PostgreSQL concurrency, live S3-compatible storage,
+richer browser coverage and human accessibility review remain outstanding.
+A04, A09, A12, A13, A15, A16, A18, A19 and A21 remain partial. The preceding UI
+integration evidence below is historical; this addendum supersedes its current
+counts and records SQL progress without declaring acceptance complete.
+
+Changed paths: React client/renderer and tests, both example hosts, persistence
+transaction/revision code and tests, service submission and acceptance test gating,
+root test script, README, UI integration guide and sprint plan/report.
+
 ## Current continuation: published UI pair (2026-10-12)
 
 Branch: `feat/ui-0.2-integration`, based on remote `feat/first-working-engine`

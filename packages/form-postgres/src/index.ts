@@ -164,13 +164,13 @@ export class FormRepository {
     };
   }
 
-  async getPublishedDefinitionById(ctx: DbContext, definitionId: string): Promise<{
+  async getPublishedDefinitionById(ctx: DbContext, definitionId: string, transactionClient?: PoolClient): Promise<{
     id: string;
     formId: string;
     publicationVersion: number;
     definition: PublishedDefinition;
   } | null> {
-    const result = await this.pool.query(
+    const result = await (transactionClient ?? this.pool).query(
       `
       SELECT p.id, p.form_id, p.publication_version, p.definition_json
       FROM published_definitions p
@@ -378,51 +378,32 @@ export class FormRepository {
     operation: string,
     idempotencyKey: string,
     payload: unknown,
-    handler: () => Promise<{ statusCode: number; response: unknown }>
+    handler: (client: PoolClient) => Promise<{ statusCode: number; response: unknown }>
   ): Promise<IdempotencyReplay> {
     const requestHash = hashPayload(payload);
-    const existing = await this.pool.query(
-      `
-      SELECT request_hash, status_code, response_json
-      FROM idempotency_keys
-      WHERE tenant_id = $1
-        AND operation = $2
-        AND key_value = $3
-        AND expires_at > NOW()
-    `,
-      [ctx.tenantId, operation, idempotencyKey]
-    );
-
-    if (existing.rowCount && existing.rowCount > 0) {
-      const row = existing.rows[0];
-      if (row.request_hash !== requestHash) {
-        throw new Error("IDEMPOTENCY_PAYLOAD_MISMATCH");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Serialize identical keys across processes, and commit mutation + replay together.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [JSON.stringify([ctx.tenantId, operation, idempotencyKey])]);
+      await client.query("DELETE FROM idempotency_keys WHERE tenant_id=$1 AND operation=$2 AND key_value=$3 AND expires_at <= NOW()", [ctx.tenantId, operation, idempotencyKey]);
+      const existing = await client.query("SELECT request_hash, status_code, response_json, created_by FROM idempotency_keys WHERE tenant_id=$1 AND operation=$2 AND key_value=$3", [ctx.tenantId, operation, idempotencyKey]);
+      if (existing.rowCount) {
+        const row = existing.rows[0];
+        if (row.created_by !== ctx.actorId) throw new Error("FORBIDDEN");
+        if (row.request_hash !== requestHash) throw new Error("IDEMPOTENCY_PAYLOAD_MISMATCH");
+        await client.query("COMMIT");
+        return { statusCode: row.status_code, response: row.response_json };
       }
-      return { statusCode: row.status_code, response: row.response_json };
-    }
-
-    const outcome = await handler();
-
-    await this.pool.query(
-      `
-      INSERT INTO idempotency_keys (id, tenant_id, operation, key_value, request_hash, response_json, status_code, created_by, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, NOW() + INTERVAL '24 hours')
-      ON CONFLICT (tenant_id, operation, key_value)
-      DO NOTHING
-    `,
-      [
-        createStableId("idem"),
-        ctx.tenantId,
-        operation,
-        idempotencyKey,
-        requestHash,
-        JSON.stringify(outcome.response),
-        outcome.statusCode,
-        ctx.actorId
-      ]
-    );
-
-    return outcome;
+      const outcome = await handler(client);
+      await client.query(`INSERT INTO idempotency_keys (id,tenant_id,operation,key_value,request_hash,response_json,status_code,created_by,expires_at)
+        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,NOW()+INTERVAL '24 hours')`, [createStableId("idem"),ctx.tenantId,operation,idempotencyKey,requestHash,JSON.stringify(outcome.response),outcome.statusCode,ctx.actorId]);
+      await client.query("COMMIT");
+      return outcome;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
   }
 
   async createRecordRevision(input: {
@@ -433,10 +414,15 @@ export class FormRepository {
     values: Record<string, unknown>;
     selectedLabels: Record<string, string>;
     uploadIds?: string[];
+    transactionClient?: PoolClient;
+    explicitMigration?: boolean;
   }): Promise<{ recordId: string; revisionId: string; revisionNumber: number }> {
-    const client = await this.pool.connect();
+    const ownTransaction = !input.transactionClient;
+    const client = input.transactionClient ?? await this.pool.connect();
     try {
-      await client.query("BEGIN");
+      if (ownTransaction) await client.query("BEGIN");
+      const publication = await client.query("SELECT p.form_id FROM published_definitions p JOIN forms f ON f.id=p.form_id WHERE p.id=$1 AND f.tenant_id=$2", [input.definitionId,input.ctx.tenantId]);
+      if (!publication.rowCount || publication.rows[0].form_id !== input.formId) throw new Error("DEFINITION_NOT_FOUND");
       const recordId = input.recordId ?? createStableId("record");
 
       let revisionNumber = 1;
@@ -451,7 +437,7 @@ export class FormRepository {
       } else {
         const lock = await client.query(
           `
-          SELECT id
+          SELECT id, form_id
           FROM records
           WHERE id = $1 AND tenant_id = $2
           FOR UPDATE
@@ -461,6 +447,10 @@ export class FormRepository {
         if (!lock.rowCount) {
           throw new Error("RECORD_NOT_FOUND");
         }
+
+        if (lock.rows[0].form_id !== input.formId) throw new Error("RECORD_FORM_CONFLICT");
+        const latestDefinition = await client.query("SELECT definition_id FROM record_revisions WHERE record_id=$1 ORDER BY revision_number DESC LIMIT 1", [recordId]);
+        if (!input.explicitMigration && latestDefinition.rows[0]?.definition_id !== input.definitionId) throw new Error("RECORD_DEFINITION_CONFLICT");
 
         const latest = await client.query(
           `
@@ -511,9 +501,10 @@ export class FormRepository {
           WHERE id = ANY($2::text[])
             AND tenant_id = $3
             AND status = 'completed'
+            AND form_id = $4
           RETURNING id
         `,
-          [revisionId, input.uploadIds, input.ctx.tenantId]
+          [revisionId, input.uploadIds, input.ctx.tenantId, input.formId]
         );
 
         if (attach.rowCount !== input.uploadIds.length) {
@@ -526,13 +517,13 @@ export class FormRepository {
         revisionNumber
       });
 
-      await client.query("COMMIT");
+      if (ownTransaction) await client.query("COMMIT");
       return { recordId, revisionId, revisionNumber };
     } catch (error) {
-      await client.query("ROLLBACK");
+      if (ownTransaction) await client.query("ROLLBACK");
       throw error;
     } finally {
-      client.release();
+      if (ownTransaction) client.release();
     }
   }
 

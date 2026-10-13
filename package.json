@@ -22,7 +22,8 @@
     "dev:infra:down": "docker compose down -v",
     "db:migrate": "npm run db:migrate -w @coderlifenet/form-postgres",
     "db:seed": "npm run db:seed -w @coderlifenet/form-postgres",
-    "test:browser": "playwright test"
+    "test:browser": "playwright test",
+    "test:integration": "node scripts/test-integration.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",

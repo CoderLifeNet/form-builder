@@ -632,6 +632,7 @@ export function createFormServer(options?: {
       }
 
       const payload = saveRecordSchema.parse(req.body);
+      await requireCapability(policyAdapter, ctx, payload.recordId ? "forms.edit" : "forms.submit", {formId:payload.formId,...(payload.recordId ? {recordId:payload.recordId} : {})});
       if (payload.binding) {
         const scope = {type:payload.binding.scopeType,id:payload.binding.scopeId};
         const ancestors = options?.bindingAncestors ? await options.bindingAncestors(ctx,scope) : [scope];
@@ -646,13 +647,14 @@ export function createFormServer(options?: {
         "records.save",
         idempotencyKey,
         payload,
-        async () => {
+        async (transactionClient) => {
           const definitionResult = await repository.getPublishedDefinitionById(
             { tenantId: ctx.tenantId, actorId: ctx.actorId },
-            payload.definitionId
+            payload.definitionId,
+            transactionClient
           );
 
-          if (!definitionResult) {
+          if (!definitionResult || definitionResult.formId !== payload.formId) {
             return {
               statusCode: 400,
               response: errorEnvelope("DEFINITION_NOT_FOUND", "Published definition not found")
@@ -682,7 +684,8 @@ export function createFormServer(options?: {
             recordId: payload.recordId,
             values: resolved,
             selectedLabels: Object.fromEntries(validationDefinition.fields.flatMap(field => (field.options ?? []).filter(option => Array.isArray(resolved[field.id]) ? (resolved[field.id] as unknown[]).includes(option.id) : resolved[field.id] === option.id).map(option => [option.id, option.label]))),
-            uploadIds: payload.uploadIds
+            uploadIds: payload.uploadIds,
+            transactionClient
           });
 
           return { statusCode: 201, response: created };
@@ -779,6 +782,7 @@ export function createFormServer(options?: {
         formId: sourceDefinition.formId,
         definitionId: targetDefinition.id,
         recordId: req.params.recordId,
+        explicitMigration: true,
         values: migrated,
         selectedLabels: {}
       });
@@ -855,7 +859,7 @@ export function createFormServer(options?: {
         res.status(403).json(errorEnvelope("FORBIDDEN", "Permission denied"));
         return;
       }
-      if (error.message === "DRAFT_CONFLICT" || error.message === "BINDING_CONFLICT") {
+      if (["DRAFT_CONFLICT", "BINDING_CONFLICT", "RECORD_FORM_CONFLICT", "RECORD_DEFINITION_CONFLICT"].includes(error.message)) {
         res.status(409).json(errorEnvelope(error.message, "The draft or binding changed. Review the current version before retrying."));
         return;
       }

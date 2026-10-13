@@ -91,3 +91,28 @@ malware scanning. Full quarantine/scanner and upload-idempotency work is unfinis
 in a temporary independent directory with the exact registry UI pair, compiles a
 consumer TSX fixture, checks catalog parity and runs SSR imports/theme rendering.
 It no longer passes merely because tarball files exist.
+
+## API errors and safe retries
+
+The browser-only `createFormApiClient` export from `@coderlifenet/form-react`
+retains HTTP status, API error code and field errors in `FormRequestError`.
+The renderer maps field errors back to their inputs and preserves entered values.
+Hosts own authentication, authorization recovery, credentials and CSRF headers.
+Use one `createMutationRetryKey()` instance per submission flow: call
+`keyFor(serializedPayload)` for the idempotency header and `committed()` only after
+success. Lost responses retain the key; changed payloads receive a new key.
+The examples demonstrate this without placing transport in framework-independent
+contracts. Submission controls are disabled while the save is pending.
+
+## Test profiles
+
+`npm test` uses fixture data and mocked dependencies. Database suites are skipped,
+even when the application's `FORM_DB_URL` is present. Browser checks use the
+isolated UI fixture, with no database or production service.
+
+`FORM_TEST_DB_URL=postgres://.../formbuilder_test npm run test:integration` is an
+explicit SQL/API integration profile. It connects to an existing dedicated test
+database and never starts Docker. It must not target an application or production
+database: these tests write fixtures and exercise migrations and erasure.
+Mocks cannot verify real SQL constraints, rollback or locking; those checks remain
+separate from everyday development tests.

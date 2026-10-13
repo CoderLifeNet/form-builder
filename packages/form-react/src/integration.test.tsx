@@ -51,3 +51,11 @@ it("ignores stale option refresh responses without resetting the saved selection
  expect(screen.queryByText("Stale choice")).toBeNull();
  expect(screen.getByRole("combobox",{name:"Choice"}).textContent).toContain("Current choice");
 });
+
+it("maps API field errors and preserves entries after a rejected submission",async()=>{
+ const { FormRequestError }=await import("./client.js");
+ render(<FormRenderer definition={definition} mode="new" initialValues={{field:"Preserved entry"}} onSubmit={async()=>{throw new FormRequestError(422,"VALIDATION_FAILED","Invalid",[{fieldId:"field",code:"BUSINESS_RULE",message:"Please review this field"}]);}}/>);
+ await userEvent.click(screen.getByRole("button",{name:"Submit"}));
+ await screen.findByText("Please review this field");
+ expect((screen.getByRole("textbox",{name:"Name"}) as HTMLInputElement).value).toBe("Preserved entry");
+});

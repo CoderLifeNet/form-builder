@@ -42,8 +42,18 @@ FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm r
 1. Run tests:
 
 ```bash
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm test
+npm test
 ```
+
+Normal tests use fixtures/mocks and do not start or use a database. For SQL/API
+integration, create a dedicated test database once and run explicitly:
+
+```bash
+FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:integration
+```
+
+This connects to an already-running test database; it does not start Docker.
+Never use the application or production database for this command.
 
 1. Build packed artifacts and verify consumer fixture:
 

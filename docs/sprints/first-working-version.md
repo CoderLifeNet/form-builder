@@ -83,3 +83,14 @@ Evidence location conventions:
 - Database execution: blocked in this environment. Run the 9 DB-dependent tests on
   the normal local PostgreSQL setup, including the 0001-to-0002 upgrade test.
 - Original A04/A09/A12/A13/A15/A16/A18/A19/A21 remain partial; no requirement is erased.
+
+## Continuation checkpoint: 2026-10-13
+
+Review branch: `feat/ui-0.2-integration`; draft PR #1 targets the preserved initial
+implementation branch. Added typed API field-error/permission recovery, stable
+lost-response submission keys, pending-submit protection and transactional record
+save/replay persistence. Normal tests now use fixtures/mocks only. Dedicated
+SQL/API tests require the explicit integration command and `FORM_TEST_DB_URL`.
+The report records current verification and distinguishes portable PostgreSQL
+checks from outstanding native concurrency coverage. All nine partial acceptance
+items remain partial; this checkpoint does not declare the engine complete.

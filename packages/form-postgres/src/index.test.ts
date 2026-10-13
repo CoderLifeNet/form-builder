@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FormRepository, makePool, MigrationRunner } from "./index.js";
 
-const dbUrl = process.env.FORM_DB_URL;
+const dbUrl = process.env.FORM_RUN_DB_TESTS === "true" ? process.env.FORM_TEST_DB_URL : undefined;
 
 const integration = dbUrl ? describe : describe.skip;
 
@@ -102,8 +102,9 @@ integration("upgrade from the original internal schema",()=>{
   const schema=`upgrade_${Date.now()}_${Math.floor(Math.random()*100000)}`;
   const admin=new Pool({connectionString:dbUrl});
   await admin.query(`CREATE SCHEMA ${schema}`);
-  const isolated=new Pool({connectionString:dbUrl,options:`-c search_path=${schema}`});
+  const isolated=new Pool({connectionString:dbUrl,max:1});
   try {
+   await isolated.query(`SET search_path TO ${schema}`);
    await isolated.query(migrations[0].sql);
    await isolated.query("INSERT INTO schema_migrations (id) VALUES ($1)",[migrations[0].id]);
    const repo=new FormRepository(isolated);const ctx={tenantId:"upgrade",actorId:"owner"};
@@ -115,6 +116,40 @@ integration("upgrade from the original internal schema",()=>{
    await runner.migrate();await runner.migrate();
    expect((await runner.status()).pending).toEqual([]);
    expect((await repo.listRecordRevisions(ctx,record.recordId))[0].values).toEqual({old:"preserved"});
-  } finally { await isolated.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end(); }
+  } finally { await isolated.query("SET search_path TO public");await isolated.end();await admin.query(`DROP SCHEMA ${schema} CASCADE`);await admin.end(); }
+ });
+});
+
+integration("transactional record idempotency",()=>{
+ let pool: ReturnType<typeof makePool>;
+ let repo: FormRepository;
+ const ctx={tenantId:`idem_${Date.now()}`,actorId:"owner"};
+ let formId:string;let definitionId:string;
+ beforeAll(async()=>{
+  pool=makePool(dbUrl);repo=new FormRepository(pool);await new MigrationRunner(pool).migrate();
+  const form=await repo.createForm(ctx,{name:"Idempotency",draft:{metadata:{formId:"f",name:"Idempotency",schemaVersion:"1.0.0"},fields:[],sections:[],dependencyVersions:{}}});
+  formId=form.formId;definitionId=(await repo.publishDraft(ctx,formId,1)).definitionId;
+ });
+ afterAll(async()=>{await pool.end();});
+ it("rolls back a mutation before replay persistence and then replays one committed result",async()=>{
+  const payload={value:"test"};
+  await expect(repo.withIdempotency(ctx,"records.save","rollback",payload,async transactionClient=>{
+   await repo.createRecordRevision({ctx,formId,definitionId,values:payload,selectedLabels:{},transactionClient});
+   throw new Error("Response persistence interrupted");
+  })).rejects.toThrow("interrupted");
+  expect(Number((await pool.query("SELECT count(*) FROM records WHERE tenant_id=$1",[ctx.tenantId])).rows[0].count)).toBe(0);
+  const saved=await repo.withIdempotency(ctx,"records.save","rollback",payload,async transactionClient=>({statusCode:201,response:await repo.createRecordRevision({ctx,formId,definitionId,values:payload,selectedLabels:{},transactionClient})}));
+  const replay=await repo.withIdempotency(ctx,"records.save","rollback",payload,async()=>{throw new Error("Must not execute on replay");});
+  expect(replay).toEqual(saved);
+  expect(Number((await pool.query("SELECT count(*) FROM records WHERE tenant_id=$1",[ctx.tenantId])).rows[0].count)).toBe(1);
+  await expect(repo.withIdempotency(ctx,"records.save","rollback",{value:"changed"},async()=>saved)).rejects.toThrow("IDEMPOTENCY_PAYLOAD_MISMATCH");
+  await expect(repo.withIdempotency({...ctx,actorId:"other"},"records.save","rollback",payload,async()=>saved)).rejects.toThrow("FORBIDDEN");
+ });
+ it.skipIf(process.env.FORM_DB_PROFILE === "portable")("serializes concurrent retries on native PostgreSQL",async()=>{
+  const payload={value:"concurrent"};
+  const outcomes=await Promise.all(Array.from({length:4},()=>repo.withIdempotency(ctx,"records.save","concurrent",payload,async transactionClient=>({statusCode:201,response:await repo.createRecordRevision({ctx,formId,definitionId,values:payload,selectedLabels:{},transactionClient})}))));
+  expect(outcomes.every(outcome=>JSON.stringify(outcome)===JSON.stringify(outcomes[0]))).toBe(true);
+  const rows=await pool.query("SELECT count(*) FROM idempotency_keys WHERE tenant_id=$1 AND key_value=$2",[ctx.tenantId,"concurrent"]);
+  expect(Number(rows.rows[0].count)).toBe(1);
  });
 });
