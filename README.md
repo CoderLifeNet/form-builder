@@ -117,6 +117,7 @@ Start with the [documentation index](docs/README.md).
 - [Decision log](docs/decisions.md)
 - [Roadmap and delivery criteria](docs/roadmap.md)
 - [Versioning and releases](docs/versioning.md)
+- [Release publishing playbook](docs/release-publishing.md)
 - [Integration and public documentation plan](docs/integration.md)
 - [File storage adapters and setup](docs/file-storage.md)
 - [Sprint plan](docs/sprints/first-working-version.md)

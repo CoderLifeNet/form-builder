@@ -1,7 +1,21 @@
 {
   "name": "@coderlifenet/form-builder",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CoderLifeNet/form-builder.git",
+    "directory": "packages/form-builder"
+  },
+  "bugs": {
+    "url": "https://github.com/CoderLifeNet/form-builder/issues"
+  },
+  "homepage": "https://github.com/CoderLifeNet/form-builder/tree/main/packages/form-builder",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha",
+    "provenance": true
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,7 +31,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@coderlifenet/form-core": "0.1.0"
+    "@coderlifenet/form-core": "0.1.0-alpha.0"
   },
   "peerDependencies": {
     "@coderlifenet/ui-core": "0.2.0-alpha.0",
@@ -34,5 +48,8 @@
     "dist",
     "!dist/**/*.test.*",
     "README.md"
-  ]
+  ],
+  "coderlifenetRelease": {
+    "licenseStatus": "pending-chris-decision"
+  }
 }

@@ -1,7 +1,21 @@
 {
   "name": "@coderlifenet/form-react",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
+  "private": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CoderLifeNet/form-builder.git",
+    "directory": "packages/form-react"
+  },
+  "bugs": {
+    "url": "https://github.com/CoderLifeNet/form-builder/issues"
+  },
+  "homepage": "https://github.com/CoderLifeNet/form-builder/tree/main/packages/form-react",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha",
+    "provenance": true
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -23,7 +37,7 @@
     "react-dom": "^19.2.8"
   },
   "dependencies": {
-    "@coderlifenet/form-core": "0.1.0"
+    "@coderlifenet/form-core": "0.1.0-alpha.0"
   },
   "devDependencies": {
     "@types/react": "19.2.2",
@@ -35,5 +49,8 @@
     "dist",
     "!dist/**/*.test.*",
     "README.md"
-  ]
+  ],
+  "coderlifenetRelease": {
+    "licenseStatus": "pending-chris-decision"
+  }
 }

@@ -6,7 +6,7 @@ const root = path.resolve(process.cwd(), "..", "..");
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "form-consumer-"));
 try {
   const names = ["core", "postgres", "server", "react", "builder"];
-  const dependencies = Object.fromEntries(names.map(name => [`@coderlifenet/form-${name}`, `file:${path.join(root, "tmp/packs", `coderlifenet-form-${name}-0.1.0.tgz`)}`]));
+  const dependencies = Object.fromEntries(names.map(name => [`@coderlifenet/form-${name}`, `file:${path.join(root, "tmp/packs", `coderlifenet-form-${name}-0.1.0-alpha.0.tgz`)}`]));
   Object.assign(dependencies, { "@coderlifenet/ui-core": "0.2.0-alpha.0", "@coderlifenet/ui-components": "0.2.0-alpha.0", react: "19.2.8", "react-dom": "19.2.8", "@mui/material": "9.4.0", "@emotion/react": "11.14.0", "@emotion/styled": "11.14.1" });
   fs.writeFileSync(path.join(directory, "package.json"), JSON.stringify({ private: true, type: "module", dependencies, devDependencies: { typescript: "5.9.3", "@types/react": "19.2.2", "@types/react-dom": "19.2.2" } }));
   execFileSync("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: directory, stdio: "inherit" });
