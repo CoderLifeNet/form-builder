@@ -28,6 +28,8 @@ export type RendererMode = "new" | "edit" | "read_only" | "history" | "compact";
 export type FormRendererProps = {
   definition: FormDefinition;
   mode: RendererMode;
+  // Host-controlled identity for definition/version/record context boundaries.
+  renderIdentity?: string;
   initialValues?: Record<string, unknown>;
   fieldErrors?: Record<string, string>;
   sourceResolver?: (sourceId: string, values: Record<string, unknown>, signal?: AbortSignal) => Promise<unknown>;
@@ -45,12 +47,16 @@ type FieldState = {
 
 export function FormRenderer(props: FormRendererProps): ReactElement {
   const instanceId = useId();
+  const renderIdentity = props.renderIdentity ?? props.definition.metadata.formId;
   const formHelpId = `${instanceId}-instructions`;
   const [values, setValues] = useState<Record<string, unknown>>(initializeValues(props.definition, props.initialValues));
   const [errors, setErrors] = useState<Record<string, string>>(props.fieldErrors ?? {});
   const pendingSubmission = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string>("");
+  const identityRef = useRef(renderIdentity);
+  const operationGeneration = useRef(0);
+  const submitController = useRef<AbortController | null>(null);
 
   useEffect(() => { setErrors(props.fieldErrors ?? {}); }, [props.fieldErrors]);
 
@@ -70,13 +76,13 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
   const [sourceOptions, setSourceOptions] = useState<Record<string, Array<{ id: string; label: string }>>>({});
   const [sourceError, setSourceError] = useState("");
   const [refresh, setRefresh] = useState(0);
-  const optionGeneration = useRef(0);
-  const definitionKeyRef = useRef(props.definition.metadata.formId);
 
   useEffect(() => {
-    if (definitionKeyRef.current === props.definition.metadata.formId) return;
-    definitionKeyRef.current = props.definition.metadata.formId;
-    optionGeneration.current += 1;
+    if (identityRef.current === renderIdentity) return;
+    identityRef.current = renderIdentity;
+    operationGeneration.current += 1;
+    submitController.current?.abort();
+    submitController.current = null;
     pendingSubmission.current = false;
     setSubmitting(false);
     setValues(initializeValues(props.definition, props.initialValues));
@@ -85,49 +91,50 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
     setSourceError("");
     setFormError("");
     setRefresh(0);
-  }, [props.definition, props.initialValues, props.fieldErrors]);
+  }, [renderIdentity, props.definition, props.initialValues, props.fieldErrors]);
 
   const resolverRef = useRef(props.optionSourceResolver);
   resolverRef.current = props.optionSourceResolver;
   const dependencies = JSON.stringify(props.definition.fields.filter(f => f.source?.kind === "options").map(f => [f.id, f.source, (f.source?.dependsOn ?? []).map(id => values[id])]));
   useEffect(() => {
     if (!resolverRef.current || props.mode === "history" || props.mode === "read_only") return;
-    const generation = ++optionGeneration.current;
+    const generation = operationGeneration.current;
     const controller = new AbortController();
     setSourceError("");
     void Promise.all(props.definition.fields.filter(f => f.source?.kind === "options").map(async field => {
       try {
         const options = (await resolverRef.current!(field.source!.id, values, controller.signal)).map(option => optionSchema.parse(option));
-        if (!controller.signal.aborted && generation === optionGeneration.current) setSourceOptions(prev => ({ ...prev, [field.id]: options }));
+        if (!controller.signal.aborted && generation === operationGeneration.current) setSourceOptions(prev => ({ ...prev, [field.id]: options }));
       } catch {
-        if (!controller.signal.aborted && generation === optionGeneration.current) setSourceError("Options could not be refreshed. Your selections are preserved.");
+        if (!controller.signal.aborted && generation === operationGeneration.current) setSourceError("Options could not be refreshed. Your selections are preserved.");
       }
     }));
     return () => controller.abort();
-  }, [dependencies, refresh, props.mode]);
+  }, [dependencies, refresh, props.mode, renderIdentity]);
 
   const valueResolver = useRef(props.sourceResolver);
   valueResolver.current = props.sourceResolver;
   const valueDependencies = JSON.stringify(props.definition.fields.filter(f => f.source?.kind !== "options").map(f => [f.id, f.source, (f.source?.dependsOn ?? []).map(id => values[id])]));
   useEffect(() => {
     if (!valueResolver.current || props.mode === "history" || props.mode === "read_only") return;
+    const generation = operationGeneration.current;
     const controller = new AbortController();
     const snapshot = values;
     for (const field of props.definition.fields) {
       const source = field.source;
       if (!source || source.kind === "options" || source.mode === "manual" || (source.mode === "create_only" && (props.mode !== "new" || snapshot[field.id] !== undefined))) continue;
       void valueResolver.current(source.id, snapshot, controller.signal).then(value => {
-        if (controller.signal.aborted || value === undefined) return;
+        if (controller.signal.aborted || generation !== operationGeneration.current || value === undefined) return;
         setValues(previous => {
           if (source.mode !== "display_only" && previous[field.id] !== snapshot[field.id]) return previous;
           return { ...previous, [field.id]: value };
         });
       }).catch(() => {
-        if (!controller.signal.aborted) setSourceError("Source data could not be loaded. Your entries are preserved.");
+        if (!controller.signal.aborted && generation === operationGeneration.current) setSourceError("Source data could not be loaded. Your entries are preserved.");
       });
     }
     return () => controller.abort();
-  }, [valueDependencies, refresh, props.mode]);
+  }, [valueDependencies, refresh, props.mode, renderIdentity]);
 
   const editable = props.mode === "new" || props.mode === "edit" || props.mode === "compact";
 
@@ -140,6 +147,11 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
       onSubmit={async (event) => {
         event.preventDefault();
         if (pendingSubmission.current) return;
+        const generation = operationGeneration.current;
+        const sameIdentity = () => generation === operationGeneration.current && identityRef.current === renderIdentity;
+        const controller = new AbortController();
+        submitController.current?.abort();
+        submitController.current = controller;
         pendingSubmission.current = true;
         setSubmitting(true);
         try {
@@ -156,12 +168,22 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
               continue;
             }
             // Resolve source values at submit time to avoid stale host values.
-            submittedValues[field.id] = await props.sourceResolver(field.source.id, submittedValues);
+            submittedValues[field.id] = await props.sourceResolver(field.source.id, submittedValues, controller.signal);
+            if (!sameIdentity()) {
+              return;
+            }
           }
         }
 
         } catch {
+          if (!sameIdentity()) {
+            return;
+          }
           setFormError("Source data could not be verified. Your entries are preserved.");
+          return;
+        }
+
+        if (!sameIdentity()) {
           return;
         }
 
@@ -174,17 +196,31 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
         }
 
         try {
+          if (!sameIdentity()) {
+            return;
+          }
           await props.onSubmit?.(submittedValues);
+          if (!sameIdentity()) {
+            return;
+          }
           setFormError("");
         } catch (error) {
+          if (!sameIdentity()) {
+            return;
+          }
           const fieldErrors = (error as { fieldErrors?: ValidationError[] })?.fieldErrors;
           if (Array.isArray(fieldErrors)) setErrors(fieldErrorsToMap(fieldErrors));
           const status = (error as { status?: number })?.status;
           setFormError(status === 401 ? "Your session expired. Sign in again; your entries are preserved." : status === 403 ? "Your permission changed. Your entries are preserved; request access before retrying." : "Submission failed. Your entries are preserved.");
         }
         } finally {
-          pendingSubmission.current = false;
-          setSubmitting(false);
+          if (submitController.current === controller) {
+            submitController.current = null;
+          }
+          if (sameIdentity()) {
+            pendingSubmission.current = false;
+            setSubmitting(false);
+          }
         }
       }}
       aria-label={props.definition.accessibility?.label ?? props.definition.metadata.name}

@@ -4,6 +4,33 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: workspace consumer path implementation tranche (2026-10-13)
+
+Branch: `feat/ui-0.2-integration`.
+
+Implemented in this tranche:
+
+- Extended `apps/example-workspace` into a first-consumer walkthrough surface with host session switching (`owner1`, `collab1`, `outsider1`) and tenant-aware `/dev/login` transitions to expose permission boundaries in one runtime.
+- Added workspace/project scope binding controls for parent default and child override behavior: scope selection, latest/pinned mode selection, optimistic save via `expectedRevision`, project override reset-to-inheritance, and active-binding visibility.
+- Added binding-aware capture entry (`Capture from scope binding`) and record-edit continuity (`Edit latest record`) so capture, revision history, and edit flows are connected in the host.
+- Added backend-sourced field behavior in the workspace example: options source (`request.categories`) and protected source resolution through `/api/definitions/:id/sources/:fieldId`.
+- Added file-upload field coverage directly in the workspace example definition and preserved server-authoritative submit payload behavior including optional `binding` payload forwarding.
+- Completed renderer identity/async isolation implementation already staged in `packages/form-react` with deterministic tests for same-definition identity switches, record identity isolation, edit preservation on same identity, and stale pending-submit side effect suppression.
+
+Verification commands for this tranche:
+
+| Command | Result |
+| --- | --- |
+| `npm run typecheck` | PASS across all packages and both examples after workspace/renderer updates. |
+| `npm test` | PASS in default fixture/mock profile (`form-react` 23/23; browser host analytics and server route suites pass; DB-gated tests remain skipped by design). |
+| `env -u FORM_TEST_DB_URL npm run test:integration` | Expected refusal: dedicated `FORM_TEST_DB_URL` required. |
+| `npm run test:browser` | PASS: 14 Playwright checks (desktop + narrow widths, keyboard and WCAG assertions). |
+| `npm run build` | PASS across packages and both examples. |
+| `npm run pack:artifacts` | PASS with refreshed package tarballs. |
+| `npm run verify:consumer` | PASS (isolated packed-consumer install and runtime smoke checks). |
+
+Outstanding blocker unchanged: dedicated native PostgreSQL verification still requires `FORM_TEST_DB_URL` in an environment where that disposable database is available.
+
 ## Continuation: unfinished acceptance closure pass (2026-10-13)
 
 Branch: `feat/ui-0.2-integration` (PR #1 review branch preserved).

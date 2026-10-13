@@ -99,3 +99,13 @@ end-to-end acceptance criteria are verified. A04/A09/A15/A19 still require
 dedicated native-PostgreSQL integration execution (`FORM_TEST_DB_URL`) to close
 with full end-to-end confidence, and native PostgreSQL concurrency verification
 remains explicitly outstanding.
+
+Latest implementation tranche on this branch now also includes the first-consumer
+workspace/project path in `apps/example-workspace`: host session switching,
+parent-default/child-override binding controls (latest/pinned with optimistic
+revision), reset-to-inheritance behavior, binding-aware capture entry, record
+edit continuity from history, backend source-driven fields, and upload field
+handling in the walkthrough app. Renderer identity/async isolation tests in
+`packages/form-react` are implemented and passing in default test profiles.
+Dedicated native PostgreSQL execution remains the unchanged blocker for final
+closure of DB-backed acceptance IDs.

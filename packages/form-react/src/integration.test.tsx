@@ -163,3 +163,87 @@ it("prevents in-flight source results from a previous form from leaking after cr
  await waitFor(() => expect((screen.getByRole("textbox", { name: "Field Two" }) as HTMLInputElement).value).toBe("second-value"));
 });
 
+it("invalidates in-flight requests when switching identities with identical form/source config", async () => {
+ const sharedFields = [{ id: "field", key: "field", type: "text", label: "Name", sectionId: "s", row: 0, width: 12, source: { id: "profile.name", version: "1", mode: "display_only", kind: "value" as const } }];
+ const base = { metadata: { formId: "same", name: "Same" }, sections: [{ id: "s", title: "S", order: 0 }], fields: sharedFields };
+ const firstDefinition = validateDefinition(base);
+ const secondDefinition = validateDefinition(base);
+ const first = deferred<unknown>();
+ let calls = 0;
+ const resolver = vi.fn(async () => {
+  calls += 1;
+  if (calls === 1) return await first.promise;
+  return "second";
+ });
+
+ const rendered = render(<FormRenderer definition={firstDefinition} mode="new" sourceResolver={resolver} renderIdentity="tenantA:formA:record1" />);
+ await waitFor(() => expect(resolver).toHaveBeenCalledTimes(1));
+ rendered.rerender(<FormRenderer definition={secondDefinition} mode="new" sourceResolver={resolver} renderIdentity="tenantB:formB:record1" />);
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("second"));
+
+ first.resolve("first");
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Name" }) as HTMLInputElement).value).toBe("second"));
+});
+
+it("resets to new record state for same form identity switches and ignores old async completions", async () => {
+ const sameForm = validateDefinition({
+  metadata: { formId: "form_shared", name: "Shared" },
+  sections: [{ id: "s", title: "Section", order: 0 }],
+  fields: [{ id: "title", key: "title", type: "text", label: "Title", sectionId: "s", row: 0, width: 12, source: { id: "title_source", version: "1", mode: "display_only", kind: "value" } }]
+ });
+ const oldDeferred = deferred<unknown>();
+ let sourceCalls = 0;
+ const resolver = vi.fn(async () => {
+  sourceCalls += 1;
+  if (sourceCalls === 1) return await oldDeferred.promise;
+  return "record-two-source";
+ });
+
+ const rendered = render(<FormRenderer definition={sameForm} mode="edit" initialValues={{ title: "record-one" }} sourceResolver={resolver} renderIdentity="form_shared:record_1" />);
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("record-one"));
+
+ rendered.rerender(<FormRenderer definition={sameForm} mode="edit" initialValues={{ title: "record-two" }} sourceResolver={resolver} renderIdentity="form_shared:record_2" />);
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("record-two-source"));
+
+ oldDeferred.resolve("old-source-value");
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("record-two-source"));
+});
+
+it("preserves edits across rerenders of the same render identity", async () => {
+ const sameDefinition = validateDefinition({
+  metadata: { formId: "preserve", name: "Preserve" },
+  sections: [{ id: "s", title: "Section", order: 0 }],
+  fields: [{ id: "title", key: "title", type: "text", label: "Title", sectionId: "s", row: 0, width: 12 }]
+ });
+ const rendered = render(<FormRenderer definition={sameDefinition} mode="edit" initialValues={{ title: "seed" }} renderIdentity="preserve:record_1" />);
+ const input = screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement;
+ await userEvent.clear(input);
+ await userEvent.type(input, "local-edit");
+
+ rendered.rerender(<FormRenderer definition={sameDefinition} mode="edit" initialValues={{ title: "server-refresh" }} renderIdentity="preserve:record_1" />);
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("local-edit"));
+});
+
+it("drops pending submission side effects when identity changes before delayed source resolution completes", async () => {
+ const sourceDefinition = validateDefinition({
+  metadata: { formId: "submit_form", name: "Submit Form" },
+  sections: [{ id: "s", title: "Section", order: 0 }],
+  fields: [{ id: "title", key: "title", type: "text", label: "Title", sectionId: "s", row: 0, width: 12, required: true, source: { id: "title_source", version: "1", mode: "display_only", kind: "value" } }]
+ });
+ const delayed = deferred<unknown>();
+ const sourceResolver = vi.fn(async () => await delayed.promise);
+ const oldSubmit = vi.fn(async () => { throw new Error("stale submit must not run"); });
+ const newSubmit = vi.fn(async () => undefined);
+
+ const rendered = render(<FormRenderer definition={sourceDefinition} mode="edit" initialValues={{ title: "one" }} sourceResolver={sourceResolver} onSubmit={oldSubmit} renderIdentity="submit_form:record_1" />);
+ const oldForm = screen.getByRole("button", { name: "Submit" }).closest("form")!;
+ fireEvent.submit(oldForm);
+
+ rendered.rerender(<FormRenderer definition={sourceDefinition} mode="edit" initialValues={{ title: "two" }} sourceResolver={async () => "new-source"} onSubmit={newSubmit} renderIdentity="submit_form:record_2" />);
+ delayed.resolve("old-source");
+ await waitFor(() => expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("two"));
+ expect(oldSubmit).toHaveBeenCalledTimes(0);
+ expect(screen.queryByText("Submission failed. Your entries are preserved.")).toBeNull();
+ expect((screen.getByRole("button", { name: "Submit" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
