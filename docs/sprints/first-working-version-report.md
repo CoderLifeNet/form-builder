@@ -4,6 +4,49 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: reusable lifecycle gap closure (2026-10-13)
+
+Branch: `feat/ui-0.2-integration`.
+
+Implemented in this pass (scoped to requested lifecycle gaps only):
+
+- Submission discovery/recall: added tenant-scoped paginated record listing with filters (`formId`, `createdBy`, `createdFrom`, `createdTo`, `query`) and auth filtering before page fill; workspace host now uses persisted submissions discovery instead of a transient latest-record shortcut.
+- Published version discovery: added authorized published-version list route and exact-version retrieval route; workspace host settings now expose published-version browsing controls.
+- Resource-specific authorization: routes now pass resolved resource context for form/definition/record/upload operations, including record summary lookup before history/migration/delete authorization decisions.
+- Edit/attachment safety: record edits now support `expectedRevision` optimistic conflict checks (`RECORD_CONFLICT` -> 409), attachment reuse on unchanged file references across edits, and preserved historical download authorization behavior.
+
+Reference host updates (`apps/example-workspace`):
+
+- Added submissions workspace view with filters, paging (`Load more`), and record actions (`Read only`, `Edit`, `History`).
+- Added read-only mode entry points and published-version controls in settings.
+- Added identity-switch state clearing to prevent stale private state cross-user leakage.
+
+Verification evidence for this pass:
+
+| Command | Result |
+| --- | --- |
+| `npm run test -w @coderlifenet/form-server` | PASS (route/unit coverage including new versions/listing/conflict/auth-path checks). |
+| `npm run test -w @coderlifenet/form-postgres` | PASS/SKIP in default profile (DB-gated tests intentionally skipped without integration env). |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:integration` | PASS with exact counts: `@coderlifenet/form-postgres` 6 passed, 0 failed, 0 skipped; `@coderlifenet/form-server` acceptance 7 passed, 0 failed, 0 skipped. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:browser:workspace` | PASS with exact counts: Playwright 1 passed, 0 failed (isolated fixture flow exercises multiple persisted submissions, reload rediscovery, record selection, read-only, edit submit, history, and exact published-version selection). |
+| `npm run typecheck` | PASS across workspace and example apps. |
+| `npm run build` | PASS across workspace and examples. |
+| `npm run test` | PASS default profile suites (DB-gated integration remains opt-in). |
+| `npm run pack:artifacts` | PASS (fresh package tarballs). |
+| `npm run verify:consumer` | PASS (packed-consumer installation/runtime smoke). |
+
+Meaningful automated coverage confirmation for requested safety checks:
+
+- Same-tenant permission denial: covered in `packages/form-server/src/acceptance.integration.test.ts` by viewer-scoped filtering and cross-tenant denial expectations (including 404 for out-of-tenant record/history and upload access).
+- Stale-edit conflicts: covered in the same acceptance suite via explicit stale `expectedRevision` edit assertions (`409 RECORD_CONFLICT`).
+- Historical attachment access: covered in the same acceptance suite by validating owner historical download success and outsider denial for the same upload.
+
+Integration readiness (this pass scope):
+
+- Functional blockers: none identified for the four requested lifecycle gaps.
+- Verification blockers: none for automated coverage in this pass scope.
+- Remaining non-pass-scope blockers: human accessibility review and broader release-governance tasks remain pending as before.
+
 ## Continuation: native PostgreSQL closure + retention policy controls (2026-10-13)
 
 Branch: `feat/ui-0.2-integration`.

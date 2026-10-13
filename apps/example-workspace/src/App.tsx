@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState, useRef, type ReactElement } from "react";
 import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder";
 import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView } from "@coderlifenet/form-react";
 import type { FormDefinition } from "@coderlifenet/form-core";
-import { Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
+import { Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
-type View = "manager" | "builder" | "capture" | "history" | "settings";
+type View = "manager" | "builder" | "capture" | "history" | "settings" | "submissions" | "readOnly";
 
 type ApiForm = {
   id: string;
@@ -35,6 +35,32 @@ type ApiRecordRevision = {
   values: Record<string, unknown>;
   selectedLabels?: Record<string, string>;
   createdAt: string;
+};
+
+type ApiRecordListItem = {
+  recordId: string;
+  formId: string;
+  formName: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  currentRevisionId: string | null;
+  currentRevisionNumber: number | null;
+  currentDefinitionId: string | null;
+};
+
+type ApiRecordListResponse = {
+  items: ApiRecordListItem[];
+  nextCursor: number | null;
+};
+
+type ApiPublishedVersion = {
+  id: string;
+  formId: string;
+  publicationVersion: number;
+  publishedAt: string;
+  fieldCount: number;
+  name: string;
 };
 
 type BindingScopeType = "workspace" | "project";
@@ -145,9 +171,19 @@ export function App(): ReactElement {
   const [activeDefinition, setActiveDefinition] = useState<ApiDefinition | null>(null);
   const [recordHistory, setRecordHistory] = useState<ApiRecordRevision[]>([]);
   const [historyDefinitions, setHistoryDefinitions] = useState<Record<string, FormDefinition>>({});
-  const [lastRecordId, setLastRecordId] = useState<string>("");
   const [captureRecordId, setCaptureRecordId] = useState<string | undefined>(undefined);
+  const [captureExpectedRevision, setCaptureExpectedRevision] = useState<number | undefined>(undefined);
   const [captureInitialValues, setCaptureInitialValues] = useState<Record<string, unknown> | undefined>(undefined);
+  const [submissions, setSubmissions] = useState<ApiRecordListItem[]>([]);
+  const [submissionsCursor, setSubmissionsCursor] = useState<number | null>(null);
+  const [submissionCreatorFilter, setSubmissionCreatorFilter] = useState("");
+  const [submissionSearch, setSubmissionSearch] = useState("");
+  const [submissionDateFrom, setSubmissionDateFrom] = useState("");
+  const [submissionDateTo, setSubmissionDateTo] = useState("");
+  const [readOnlyDefinition, setReadOnlyDefinition] = useState<ApiDefinition | null>(null);
+  const [readOnlyValues, setReadOnlyValues] = useState<Record<string, unknown>>({});
+  const [publishedVersions, setPublishedVersions] = useState<ApiPublishedVersion[]>([]);
+  const [selectedPublicationVersion, setSelectedPublicationVersion] = useState<number | "">("");
   const [bindingScopeType, setBindingScopeType] = useState<BindingScopeType>("workspace");
   const [bindingScopeId, setBindingScopeId] = useState("example-workspace");
   const [bindingMode, setBindingMode] = useState<"latest" | "pinned">("latest");
@@ -217,12 +253,59 @@ export function App(): ReactElement {
     });
   }, [bindingScopeType, bindingScopeId]);
 
+  useEffect(() => {
+    if (!activeId) {
+      setPublishedVersions([]);
+      setSelectedPublicationVersion("");
+      return;
+    }
+    void loadPublishedVersions(activeId).catch(() => {
+      setPublishedVersions([]);
+      setSelectedPublicationVersion("");
+    });
+  }, [activeId]);
+
   async function refreshForms(): Promise<void> {
     const next = await api<ApiForm[]>("/api/forms?includeArchived=true");
     setForms(next);
     if (!activeId && next.length > 0) {
       setActiveId(next[0].id);
     }
+  }
+
+  async function loadPublishedVersions(formId: string): Promise<void> {
+    const versions = await api<ApiPublishedVersion[]>(`/api/forms/${formId}/versions`);
+    setPublishedVersions(versions);
+    setSelectedPublicationVersion(versions[0]?.publicationVersion ?? "");
+  }
+
+  async function loadSubmissions(reset: boolean): Promise<void> {
+    const params = new URLSearchParams();
+    if (activeId) params.set("formId", activeId);
+    params.set("pageSize", "20");
+    params.set("cursor", String(reset ? 0 : (submissionsCursor ?? 0)));
+    if (submissionCreatorFilter) params.set("createdBy", submissionCreatorFilter);
+    if (submissionSearch) params.set("query", submissionSearch);
+    if (submissionDateFrom) params.set("createdFrom", new Date(submissionDateFrom).toISOString());
+    if (submissionDateTo) params.set("createdTo", new Date(submissionDateTo).toISOString());
+
+    const listed = await api<ApiRecordListResponse>(`/api/records?${params.toString()}`);
+    setSubmissions((previous) => (reset ? listed.items : [...previous, ...listed.items]));
+    setSubmissionsCursor(listed.nextCursor);
+  }
+
+  function clearPrivateViewState(): void {
+    setActiveDraft(null);
+    setActiveDefinition(null);
+    setCaptureRecordId(undefined);
+    setCaptureExpectedRevision(undefined);
+    setCaptureInitialValues(undefined);
+    setRecordHistory([]);
+    setHistoryDefinitions({});
+    setSubmissions([]);
+    setSubmissionsCursor(null);
+    setReadOnlyDefinition(null);
+    setReadOnlyValues({});
   }
 
   async function openBuilder(formId: string): Promise<void> {
@@ -244,6 +327,7 @@ export function App(): ReactElement {
     setActiveId(formId);
     setActiveDefinition(definition);
     setCaptureRecordId(options?.recordId);
+    setCaptureExpectedRevision(undefined);
     setCaptureInitialValues(options?.initialValues);
     setView("capture");
   }
@@ -268,9 +352,50 @@ export function App(): ReactElement {
     const definition = await api<ApiDefinition>(`/api/definitions/${latest.definitionId}`);
     setActiveId(definition.formId);
     setCaptureRecordId(recordId);
+    setCaptureExpectedRevision(latest.revisionNumber);
     setCaptureInitialValues(latest.values);
     setActiveDefinition(definition);
     setView("capture");
+  }
+
+  async function openRecordHistory(recordId: string): Promise<void> {
+    const revisions = await api<ApiRecordRevision[]>(`/api/records/${recordId}/history`);
+    if (!revisions.length) {
+      setStatus("No revisions were found for this record.");
+      return;
+    }
+    const uniqueDefinitionIds = [...new Set(revisions.map((item) => item.definitionId))];
+    const definitions = await Promise.all(
+      uniqueDefinitionIds.map(async (definitionId) => {
+        const definition = await api<ApiDefinition>(`/api/definitions/${definitionId}`);
+        return [definitionId, definition.definition] as const;
+      })
+    );
+    const latestDefinition = await api<ApiDefinition>(`/api/definitions/${revisions[0].definitionId}`);
+    setActiveDefinition(latestDefinition);
+    setHistoryDefinitions(Object.fromEntries(definitions));
+    setRecordHistory(revisions);
+    setView("history");
+  }
+
+  async function openReadOnlyRecord(recordId: string): Promise<void> {
+    const revisions = await api<ApiRecordRevision[]>(`/api/records/${recordId}/history`);
+    if (!revisions.length) {
+      setStatus("No revisions were found for this record.");
+      return;
+    }
+    const latest = revisions[0];
+    const definition = await api<ApiDefinition>(`/api/definitions/${latest.definitionId}`);
+    setReadOnlyDefinition(definition);
+    setReadOnlyValues(latest.values);
+    setView("readOnly");
+  }
+
+  async function openPublishedVersionReadOnly(formId: string, publicationVersion: number): Promise<void> {
+    const definition = await api<ApiDefinition>(`/api/forms/${formId}/versions/${publicationVersion}`);
+    setReadOnlyDefinition(definition);
+    setReadOnlyValues({});
+    setView("readOnly");
   }
 
   async function createForm(): Promise<void> {
@@ -319,29 +444,38 @@ export function App(): ReactElement {
         <Button type="button" variant={view === "manager" ? "contained" : "outlined"} onClick={() => setView("manager")}>Manager</Button>
         <Button type="button" variant={view === "builder" ? "contained" : "outlined"} onClick={() => activeId && openBuilder(activeId)}>Builder</Button>
         <Button type="button" variant={view === "capture" ? "contained" : "outlined"} onClick={() => activeId && openCapture(activeId)}>Capture</Button>
+        <Button type="button" variant={view === "submissions" ? "contained" : "outlined"} onClick={async () => {
+          setView("submissions");
+          await loadSubmissions(true);
+        }}>Submissions</Button>
         <Button
           type="button"
           variant={view === "history" ? "contained" : "outlined"}
           onClick={async () => {
-            if (!lastRecordId) {
-              setStatus("Submit a record first.");
+            if (!submissions.length) {
+              await loadSubmissions(true);
+            }
+            const target = submissions[0];
+            if (!target) {
+              setStatus("Submit at least one record first.");
               return;
             }
-            const revisions = await api<ApiRecordRevision[]>(`/api/records/${lastRecordId}/history`);
-            const uniqueDefinitionIds = [...new Set(revisions.map((item) => item.definitionId))];
-            const definitions = await Promise.all(
-              uniqueDefinitionIds.map(async (definitionId) => {
-                const definition = await api<ApiDefinition>(`/api/definitions/${definitionId}`);
-                return [definitionId, definition.definition] as const;
-              })
-            );
-            setHistoryDefinitions(Object.fromEntries(definitions));
-            setRecordHistory(revisions);
-            setView("history");
+            await openRecordHistory(target.recordId);
           }}
         >
           History
         </Button>
+        <Button type="button" variant={view === "readOnly" ? "contained" : "outlined"} onClick={async () => {
+          if (!submissions.length) {
+            await loadSubmissions(true);
+          }
+          const target = submissions[0];
+          if (!target) {
+            setStatus("No submission is available yet.");
+            return;
+          }
+          await openReadOnlyRecord(target.recordId);
+        }}>Read only</Button>
         <Button type="button" variant={view === "settings" ? "contained" : "outlined"} onClick={() => setView("settings")}>Settings</Button>
         <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
           {useCustomTheme ? "Custom theme on" : "Stock MUI theme"}
@@ -357,10 +491,15 @@ export function App(): ReactElement {
               const userId = String(event.target.value);
               const tenantId = userId === "outsider1" ? "tenant_beta" : "tenant_alpha";
               try {
+                clearPrivateViewState();
+                setView("manager");
                 await login(userId, tenantId);
                 await refreshForms();
                 await refreshCapabilities();
                 await refreshBinding();
+                if (activeId) {
+                  await loadPublishedVersions(activeId);
+                }
                 setStatus(`Connected as ${userId} (${tenantId})`);
               } catch (error) {
                 setStatus(error instanceof Error ? error.message : "Unable to switch session");
@@ -380,7 +519,10 @@ export function App(): ReactElement {
           <Stack spacing={1.5}>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <Button type="button" variant="outlined" onClick={() => void openCaptureFromScopeBinding()}>Capture from scope binding</Button>
-              <Button type="button" variant="outlined" disabled={!lastRecordId} onClick={() => lastRecordId && void openEditRecord(lastRecordId)}>Edit latest record</Button>
+              <Button type="button" variant="outlined" onClick={async () => {
+                setView("submissions");
+                await loadSubmissions(true);
+              }}>Browse submissions</Button>
             </Stack>
             <FormManager
               forms={managerForms}
@@ -530,6 +672,38 @@ export function App(): ReactElement {
             <Typography variant="body2" color="text.secondary">
               Active binding: {binding ? `${binding.source.type}/${binding.source.id} -> ${binding.mode} (${binding.definitionId}) rev ${binding.revision}` : "none"}
             </Typography>
+
+            <Stack spacing={1}>
+              <Typography variant="h6">Published versions</Typography>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+                <FormControl size="small" sx={{ minWidth: 260 }}>
+                  <InputLabel id="published-version-label">Version</InputLabel>
+                  <Select
+                    labelId="published-version-label"
+                    label="Version"
+                    value={selectedPublicationVersion}
+                    onChange={(event) => setSelectedPublicationVersion(Number(event.target.value))}
+                  >
+                    {publishedVersions.map((version) => (
+                      <MenuItem key={version.id} value={version.publicationVersion}>
+                        v{version.publicationVersion} · {new Date(version.publishedAt).toLocaleString()} · {version.fieldCount} fields
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Button
+                  type="button"
+                  variant="outlined"
+                  disabled={!activeId || selectedPublicationVersion === ""}
+                  onClick={async () => {
+                    if (!activeId || selectedPublicationVersion === "") return;
+                    await openPublishedVersionReadOnly(activeId, Number(selectedPublicationVersion));
+                  }}
+                >
+                  Open selected version read only
+                </Button>
+              </Stack>
+            </Stack>
           </Stack>
         ) : null}
 
@@ -593,10 +767,12 @@ export function App(): ReactElement {
             }}
             mode={captureRecordId ? "edit" : "new"}
             onSubmit={async (values) => {
+              const editingRecordId = captureRecordId;
               const payload = JSON.stringify({
                   formId: activeId,
                   definitionId: activeDefinition.id,
-                  recordId: captureRecordId,
+                  recordId: editingRecordId,
+                  expectedRevision: editingRecordId ? captureExpectedRevision : undefined,
                   binding: binding ? { scopeType: bindingScopeType, scopeId: bindingScopeId, revision: binding.revision, definitionId: binding.definitionId } : undefined,
                   values,
                   uploadIds: activeDefinition.definition.fields.filter(field => field.type === "single_file" || field.type === "multi_file").flatMap(field => Array.isArray(values[field.id]) ? values[field.id] as string[] : values[field.id] ? [String(values[field.id])] : [])
@@ -609,17 +785,73 @@ export function App(): ReactElement {
                 body: payload
               });
               submissionKey.current.committed();
-              setLastRecordId(result.recordId);
               setCaptureRecordId(result.recordId);
+              setCaptureExpectedRevision((previous) => (editingRecordId ? (previous ?? 0) + 1 : 1));
               setCaptureInitialValues(values);
+              await loadSubmissions(true);
               setStatus(`Record saved: ${result.recordId}`);
             }}
           />
         ) : null}
 
+        {view === "submissions" ? (
+          <Stack spacing={1.5}>
+            <Typography variant="h6">Submissions</Typography>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField size="small" label="Created by" value={submissionCreatorFilter} onChange={(event) => setSubmissionCreatorFilter(event.target.value)} />
+              <TextField size="small" label="Record or form search" value={submissionSearch} onChange={(event) => setSubmissionSearch(event.target.value)} />
+              <TextField size="small" type="date" label="From" value={submissionDateFrom} onChange={(event) => setSubmissionDateFrom(event.target.value)} />
+              <TextField size="small" type="date" label="To" value={submissionDateTo} onChange={(event) => setSubmissionDateTo(event.target.value)} />
+              <Button type="button" variant="contained" onClick={() => void loadSubmissions(true)}>Apply filters</Button>
+            </Stack>
+            {submissions.map((submission) => (
+              <Paper key={submission.recordId} variant="outlined" sx={{ p: 1.5 }} data-testid={`submission-${submission.recordId}`}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ justifyContent: "space-between" }}>
+                  <Box>
+                    <Typography variant="subtitle1">{submission.recordId}</Typography>
+                    <Typography variant="body2" color="text.secondary">{submission.formName} · created by {submission.createdBy}</Typography>
+                    <Typography variant="body2" color="text.secondary">Created {new Date(submission.createdAt).toLocaleString()} · Updated {new Date(submission.updatedAt).toLocaleString()}</Typography>
+                    <Typography variant="body2" color="text.secondary">Revision {submission.currentRevisionNumber ?? "-"}</Typography>
+                  </Box>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                    <Button type="button" variant="outlined" onClick={() => void openReadOnlyRecord(submission.recordId)}>Read only</Button>
+                    <Button type="button" variant="outlined" onClick={() => void openEditRecord(submission.recordId)}>Edit</Button>
+                    <Button type="button" variant="outlined" onClick={() => void openRecordHistory(submission.recordId)}>History</Button>
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))}
+            {!submissions.length ? <Typography variant="body2" color="text.secondary">No submissions found for the current filters.</Typography> : null}
+            <Button type="button" variant="outlined" disabled={submissionsCursor === null} onClick={() => void loadSubmissions(false)}>Load more</Button>
+          </Stack>
+        ) : null}
+
+        {view === "readOnly" && readOnlyDefinition ? (
+          <Stack spacing={1.5}>
+            <Typography variant="h6">Read-only rendering</Typography>
+            <FormRenderer
+              key={`readonly:${readOnlyDefinition.id}`}
+              renderIdentity={`readonly:${sessionTenantId}:${readOnlyDefinition.id}`}
+              definition={readOnlyDefinition.definition}
+              initialValues={readOnlyValues}
+              mode="read_only"
+            />
+          </Stack>
+        ) : null}
+
         {view === "history" && recordHistory.length > 0 && activeDefinition ? (
           <Stack spacing={1.5}>
-            <Button type="button" variant="outlined" onClick={() => lastRecordId && void openEditRecord(lastRecordId)}>Edit latest record</Button>
+            <Button type="button" variant="outlined" onClick={async () => {
+              if (!submissions.length) {
+                await loadSubmissions(true);
+              }
+              const target = submissions[0];
+              if (!target) {
+                setStatus("No submission is available to edit.");
+                return;
+              }
+              await openEditRecord(target.recordId);
+            }}>Edit latest record</Button>
             <RecordHistoryView
               definition={activeDefinition.definition}
               revisions={recordHistory.map((item) => ({

@@ -113,3 +113,18 @@ repository selection logic in `packages/form-postgres`. Dedicated native
 PostgreSQL execution has been run locally with `FORM_TEST_DB_URL` and the
 integration suite now passes for persistence + server acceptance, including
 native concurrent idempotency and retention-selection coverage.
+
+## Continuation checkpoint: 2026-10-13 (lifecycle gap closure)
+
+Scope-limited completion on `feat/ui-0.2-integration` for the requested reusable lifecycle contracts:
+
+- Submission discovery/recall: implemented paginated tenant-scoped record discovery with filters and authorization-before-pagination semantics; workspace host now uses persisted submissions browsing instead of transient latest-record assumptions.
+- Published version discovery: implemented authorized published-version listing and exact-version retrieval routes; workspace host settings now expose published-version controls.
+- Resource-specific authorization: added explicit resource context propagation to listed routes, including pre-auth record summary resolution for history/migration/delete operations.
+- Edit/attachment safety: added required `expectedRevision` support for record edits with conflict signaling and attachment reuse preservation across edits.
+
+Current state after this pass:
+
+- In-scope functionality: implemented.
+- Automated verification for this scope: passing (typecheck, build, default tests, native integration, workspace browser check, packed consumer verification).
+- Out-of-scope release blockers remain unchanged: human accessibility review and release/publication governance tasks.

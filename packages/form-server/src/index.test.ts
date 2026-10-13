@@ -62,7 +62,11 @@ function makeRepositoryStub() {
     markUploadDeletionPending: async () => undefined,
     deleteUploadRow: async () => undefined,
     withIdempotency: async (_ctx: any, _op: string, _key: string, _payload: unknown, handler: any) => handler(),
-    createRecordRevision: async () => ({ recordId: "r1", revisionId: "rev1", revisionNumber: 1 })
+    createRecordRevision: async () => ({ recordId: "r1", revisionId: "rev1", revisionNumber: 1 }),
+    listPublishedDefinitionsByForm: async () => [{ id: "d1", formId: "f1", publicationVersion: 1, publishedAt: new Date().toISOString(), fieldCount: 1, name: "Form" }],
+    getPublishedDefinitionByVersion: async () => ({ id: "d1", formId: "f1", publicationVersion: 1, definition }),
+    listRecordSummaries: async () => [],
+    getRecordSummaryById: async () => ({ recordId: "r1", formId: "f1", formName: "Form", createdBy: "owner1", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev1", currentRevisionNumber: 1, currentDefinitionId: "d1" })
   };
 }
 
@@ -114,6 +118,20 @@ describe("form server", () => {
     expect(response.status).toBe(422);
     expect(response.body.code).toBe("VALIDATION_FAILED");
     expect(response.body.fieldErrors[0].fieldId).toBe("field_title");
+  });
+
+  it("requires expectedRevision when editing an existing record", async () => {
+    const app = createFormServer({
+      repository: makeRepositoryStub() as any,
+      policyAdapter: allowCapabilities(["forms.submit", "forms.edit"])
+    });
+    const response = await request(app)
+      .post("/api/records")
+      .set("idempotency-key", "k1")
+      .send({ formId: "f1", definitionId: "d1", recordId: "r1", values: { field_title: "hello" } });
+
+    expect(response.status).toBe(400);
+    expect(response.body.code).toBe("EXPECTED_REVISION_REQUIRED");
   });
 
   it("stores upload through adapter", async () => {
@@ -276,6 +294,53 @@ describe("form server", () => {
     });
     expect(unsafe.status).toBe(400);
     expect(unsafe.body.code).toBe("UNSAFE_INPUT");
+  });
+
+  it("lists published versions and returns exact version by publication number", async () => {
+    const app = createFormServer({
+      repository: makeRepositoryStub() as any,
+      policyAdapter: allowCapabilities(["forms.read"])
+    });
+
+    const list = await request(app).get("/api/forms/f1/versions");
+    expect(list.status).toBe(200);
+    expect(list.body[0].formId).toBe("f1");
+
+    const exact = await request(app).get("/api/forms/f1/versions/1");
+    expect(exact.status).toBe(200);
+    expect(exact.body.id).toBe("d1");
+  });
+
+  it("filters record discovery by resource authorization before pagination", async () => {
+    const app = createFormServer({
+      repository: {
+        ...makeRepositoryStub(),
+        listRecordSummaries: async (_ctx: unknown, options: { offset: number; limit: number }) => {
+          const all = [
+            { recordId: "r3", formId: "f3", formName: "Form 3", createdBy: "owner3", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev3", currentRevisionNumber: 3, currentDefinitionId: "d3" },
+            { recordId: "r2", formId: "f2", formName: "Form 2", createdBy: "owner2", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev2", currentRevisionNumber: 2, currentDefinitionId: "d2" },
+            { recordId: "r1", formId: "f1", formName: "Form 1", createdBy: "owner1", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev1", currentRevisionNumber: 1, currentDefinitionId: "d1" }
+          ];
+          return all.slice(options.offset, options.offset + options.limit);
+        }
+      } as any,
+      policyAdapter: {
+        resolveContext: async () => ({ tenantId: "tenant_demo", actorId: "viewer1", isAnonymous: false }),
+        authorize: async (_ctx, capability, resource) => {
+          if (capability !== "forms.read") {
+            return { allowed: false, capabilities: [] };
+          }
+          if (resource?.recordId === "r2") {
+            return { allowed: false, capabilities: ["forms.read"] };
+          }
+          return { allowed: true, capabilities: ["forms.read"] };
+        }
+      }
+    });
+
+    const response = await request(app).get("/api/records?pageSize=2");
+    expect(response.status).toBe(200);
+    expect(response.body.items.map((item: { recordId: string }) => item.recordId)).toEqual(["r3", "r1"]);
   });
 });
 

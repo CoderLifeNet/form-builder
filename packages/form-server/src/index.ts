@@ -64,9 +64,20 @@ const saveRecordSchema = z.object({
   formId: z.string().min(1),
   definitionId: z.string().min(1),
   recordId: z.string().optional(),
+  expectedRevision: z.number().int().positive().optional(),
   values: z.record(z.string(), z.unknown()),
   uploadIds: z.array(z.string()).default([]),
   binding: z.object({ scopeType:z.string().min(1), scopeId:z.string().min(1), revision:z.number().int().positive(), definitionId:z.string().min(1) }).optional()
+});
+
+const recordListQuerySchema = z.object({
+  cursor: z.coerce.number().int().nonnegative().default(0),
+  pageSize: z.coerce.number().int().min(1).max(100).default(25),
+  formId: z.string().min(1).optional(),
+  createdBy: z.string().min(1).optional(),
+  createdFrom: z.string().datetime().optional(),
+  createdTo: z.string().datetime().optional(),
+  query: z.string().min(1).max(120).optional()
 });
 
 const importAsNewSchema = z.object({
@@ -192,7 +203,7 @@ export function createFormServer(options?: {
   app.get("/api/forms", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.read");
+      await requireCapability(policyAdapter, ctx, "forms.read", { scopeType: "tenant", scopeId: ctx.tenantId });
       const includeArchived = req.query.includeArchived === "true";
       const forms = await repository.listForms({ tenantId: ctx.tenantId, actorId: ctx.actorId }, { includeArchived });
       res.status(200).json(forms);
@@ -204,7 +215,7 @@ export function createFormServer(options?: {
   app.get("/api/forms/:formId", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.read");
+      await requireCapability(policyAdapter, ctx, "forms.read", { formId: req.params.formId });
       const form = await repository.getFormById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
       if (!form) {
         res.status(404).json(errorEnvelope("FORM_NOT_FOUND", "Form not found"));
@@ -219,7 +230,6 @@ export function createFormServer(options?: {
   app.get("/api/definitions/:definitionId", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.read");
       const definition = await repository.getPublishedDefinitionById(
         { tenantId: ctx.tenantId, actorId: ctx.actorId },
         req.params.definitionId
@@ -228,6 +238,42 @@ export function createFormServer(options?: {
         res.status(404).json(errorEnvelope("DEFINITION_NOT_FOUND", "Definition not found"));
         return;
       }
+      await requireCapability(policyAdapter, ctx, "forms.read", { formId: definition.formId, definitionId: definition.id });
+      res.status(200).json(definition);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/forms/:formId/versions", async (req, res, next) => {
+    try {
+      const ctx = await policyAdapter.resolveContext(req);
+      await requireCapability(policyAdapter, ctx, "forms.read", { formId: req.params.formId });
+      const versions = await repository.listPublishedDefinitionsByForm({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
+      res.status(200).json(versions);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.get("/api/forms/:formId/versions/:publicationVersion", async (req, res, next) => {
+    try {
+      const ctx = await policyAdapter.resolveContext(req);
+      const publicationVersion = z.coerce.number().int().positive().parse(req.params.publicationVersion);
+      const definition = await repository.getPublishedDefinitionByVersion(
+        { tenantId: ctx.tenantId, actorId: ctx.actorId },
+        req.params.formId,
+        publicationVersion
+      );
+      if (!definition) {
+        res.status(404).json(errorEnvelope("DEFINITION_NOT_FOUND", "Definition not found"));
+        return;
+      }
+      await requireCapability(policyAdapter, ctx, "forms.read", {
+        formId: req.params.formId,
+        publicationVersion: String(publicationVersion),
+        definitionId: definition.id
+      });
       res.status(200).json(definition);
     } catch (error) {
       next(error);
@@ -269,17 +315,22 @@ export function createFormServer(options?: {
   app.get("/api/capabilities/sources", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { scopeType: "tenant", scopeId: ctx.tenantId });
       res.json(await sourceRegistry.capabilities?.(ctx) ?? {});
     } catch (error) { next(error); }
   });
   app.post("/api/definitions/:definitionId/sources/:fieldId", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.read");
+      await requireCapability(policyAdapter, ctx, "forms.read", { definitionId: req.params.definitionId });
       const published = await repository.getPublishedDefinitionById(ctx, req.params.definitionId);
-      const field = published?.definition.fields.find(field => field.id === req.params.fieldId);
+      if (!published) {
+        res.status(404).json(errorEnvelope("DEFINITION_NOT_FOUND", "Definition not found"));
+        return;
+      }
+      const field = published.definition.fields.find(field => field.id === req.params.fieldId);
       if (!field?.source) { res.status(404).json(errorEnvelope("SOURCE_NOT_FOUND", "Source not found.")); return; }
+      await requireCapability(policyAdapter, ctx, "forms.read", { formId: published.formId, definitionId: published.id, fieldId: req.params.fieldId });
       const values = z.record(z.string(), z.unknown()).parse(req.body?.values ?? {});
       const result = await sourceRegistry.resolveSourceValue(field.source.id, ctx, values);
       res.json({ value: result });
@@ -289,7 +340,7 @@ export function createFormServer(options?: {
   app.post("/api/forms", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { scopeType: "tenant", scopeId: ctx.tenantId });
 
       const payload = createFormSchema.parse(req.body);
       const formId = createStableId("form");
@@ -319,7 +370,7 @@ export function createFormServer(options?: {
   app.post("/api/forms/:formId/duplicate", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
 
       const form = await repository.getFormById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
       if (!form) {
@@ -354,7 +405,7 @@ export function createFormServer(options?: {
   app.get("/api/forms/:formId/export", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.export");
+      await requireCapability(policyAdapter, ctx, "forms.export", { formId: req.params.formId });
 
       const draft = await repository.getDraft({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
       if (!draft) {
@@ -371,7 +422,7 @@ export function createFormServer(options?: {
   app.post("/api/forms/import-as-new", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { scopeType: "tenant", scopeId: ctx.tenantId });
 
       const payload = importAsNewSchema.parse(req.body);
       const imported = importDefinitionEnvelope(payload.envelope);
@@ -395,7 +446,7 @@ export function createFormServer(options?: {
   app.post("/api/forms/:formId/import-replace/preview", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
 
       const imported = importDefinitionEnvelope(req.body?.envelope);
       const current = await repository.getDraft({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
@@ -419,7 +470,7 @@ export function createFormServer(options?: {
   app.post("/api/forms/:formId/import-replace/commit", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
 
       const payload = importReplaceSchema.parse(req.body);
       const imported = importDefinitionEnvelope(payload.envelope);
@@ -441,7 +492,7 @@ export function createFormServer(options?: {
   app.post("/api/forms/:formId/archive", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.archive");
+      await requireCapability(policyAdapter, ctx, "forms.archive", { formId: req.params.formId });
       await repository.archiveForm({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId, true);
       res.status(204).end();
     } catch (error) {
@@ -452,7 +503,7 @@ export function createFormServer(options?: {
   app.post("/api/forms/:formId/restore", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.archive");
+      await requireCapability(policyAdapter, ctx, "forms.archive", { formId: req.params.formId });
       await repository.archiveForm({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId, false);
       res.status(204).end();
     } catch (error) {
@@ -463,7 +514,7 @@ export function createFormServer(options?: {
   app.get("/api/forms/:formId/draft", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
       const draft = await repository.getDraft({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
       if (!draft) {
         res.status(404).json(errorEnvelope("FORM_NOT_FOUND", "Form draft not found"));
@@ -478,7 +529,7 @@ export function createFormServer(options?: {
   app.put("/api/forms/:formId/draft", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.design");
+      await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
 
       const payload = saveDraftSchema.parse(req.body);
       const validated = validateDefinition(payload.definition);
@@ -498,7 +549,7 @@ export function createFormServer(options?: {
   app.post("/api/forms/:formId/publish", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.publish");
+      await requireCapability(policyAdapter, ctx, "forms.publish", { formId: req.params.formId });
       const payload = publishSchema.parse(req.body);
       const draft = await repository.getDraft(ctx, req.params.formId);
       if (!draft) throw new Error("FORM_NOT_FOUND");
@@ -526,7 +577,7 @@ export function createFormServer(options?: {
     async (req, res, next) => {
       try {
         const ctx = await policyAdapter.resolveContext(req);
-        await requireCapability(policyAdapter, ctx, "forms.upload");
+        await requireCapability(policyAdapter, ctx, "forms.upload", { formId: req.params.formId });
 
         const fileName = req.header("x-file-name");
         const contentType = req.header("x-file-content-type") ?? "application/octet-stream";
@@ -576,13 +627,15 @@ export function createFormServer(options?: {
   app.get("/api/uploads/:uploadId/download", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.read");
+      await requireCapability(policyAdapter, ctx, "forms.read", { uploadId: req.params.uploadId });
 
       const upload = await repository.getUploadById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.uploadId);
       if (!upload) {
         res.status(404).json(errorEnvelope("UPLOAD_NOT_FOUND", "Upload not found"));
         return;
       }
+
+      await requireCapability(policyAdapter, ctx, "forms.read", { formId: upload.formId, uploadId: upload.id });
 
       const object = await uploadStorage.getObject({
         tenantId: ctx.tenantId,
@@ -603,13 +656,15 @@ export function createFormServer(options?: {
   app.delete("/api/uploads/:uploadId", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.delete");
+      await requireCapability(policyAdapter, ctx, "forms.delete", { uploadId: req.params.uploadId });
 
       const upload = await repository.getUploadById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.uploadId);
       if (!upload) {
         res.status(404).json(errorEnvelope("UPLOAD_NOT_FOUND", "Upload not found"));
         return;
       }
+
+      await requireCapability(policyAdapter, ctx, "forms.delete", { formId: upload.formId, uploadId: upload.id });
 
       if (upload.attachedRevisionId) {
         res.status(409).json(errorEnvelope("UPLOAD_IN_HISTORY", "Erase the owning record through the authorized retention workflow."));
@@ -627,7 +682,7 @@ export function createFormServer(options?: {
   app.post("/api/records", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.submit");
+      await requireCapability(policyAdapter, ctx, "forms.submit", { scopeType: "tenant", scopeId: ctx.tenantId });
 
       const idempotencyKey = req.header("idempotency-key");
       if (!idempotencyKey) {
@@ -636,6 +691,10 @@ export function createFormServer(options?: {
       }
 
       const payload = saveRecordSchema.parse(req.body);
+      if (payload.recordId && payload.expectedRevision === undefined) {
+        res.status(400).json(errorEnvelope("EXPECTED_REVISION_REQUIRED", "expectedRevision is required when editing an existing record."));
+        return;
+      }
       await requireCapability(policyAdapter, ctx, payload.recordId ? "forms.edit" : "forms.submit", {formId:payload.formId,...(payload.recordId ? {recordId:payload.recordId} : {})});
       if (payload.binding) {
         const scope = {type:payload.binding.scopeType,id:payload.binding.scopeId};
@@ -686,6 +745,7 @@ export function createFormServer(options?: {
             formId: definitionResult.formId,
             definitionId: payload.definitionId,
             recordId: payload.recordId,
+            expectedRevision: payload.expectedRevision,
             values: resolved,
             selectedLabels: Object.fromEntries(validationDefinition.fields.flatMap(field => (field.options ?? []).filter(option => Array.isArray(resolved[field.id]) ? (resolved[field.id] as unknown[]).includes(option.id) : resolved[field.id] === option.id).map(option => [option.id, option.label]))),
             uploadIds: payload.uploadIds,
@@ -702,10 +762,77 @@ export function createFormServer(options?: {
     }
   });
 
+  app.get("/api/records", async (req, res, next) => {
+    try {
+      const ctx = await policyAdapter.resolveContext(req);
+      await requireCapability(policyAdapter, ctx, "forms.read", { scopeType: "tenant", scopeId: ctx.tenantId });
+
+      const query = recordListQuerySchema.parse(req.query);
+      const filters = {
+        formId: query.formId,
+        createdBy: query.createdBy,
+        createdFrom: query.createdFrom,
+        createdTo: query.createdTo,
+        query: query.query
+      };
+
+      const batchSize = Math.min(200, query.pageSize * 3);
+      let scanned = query.cursor;
+      let hasMore = true;
+      const items: Array<{
+        recordId: string;
+        formId: string;
+        formName: string;
+        createdBy: string;
+        createdAt: string;
+        updatedAt: string;
+        currentRevisionId: string | null;
+        currentRevisionNumber: number | null;
+        currentDefinitionId: string | null;
+      }> = [];
+
+      while (items.length < query.pageSize && hasMore) {
+        const batch = await repository.listRecordSummaries(
+          { tenantId: ctx.tenantId, actorId: ctx.actorId },
+          { offset: scanned, limit: batchSize, filters }
+        );
+        scanned += batch.length;
+        hasMore = batch.length === batchSize;
+
+        for (const record of batch) {
+          const decision = await policyAdapter.authorize(ctx, "forms.read", {
+            formId: record.formId,
+            recordId: record.recordId,
+            createdBy: record.createdBy
+          });
+          if (!decision.allowed) {
+            continue;
+          }
+          items.push(record);
+          if (items.length === query.pageSize) {
+            break;
+          }
+        }
+      }
+
+      res.status(200).json({
+        items,
+        nextCursor: hasMore ? scanned : null
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.get("/api/records/:recordId/history", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.history");
+      const summary = await repository.getRecordSummaryById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
+      if (!summary) {
+        res.status(404).json(errorEnvelope("RECORD_NOT_FOUND", "Record not found"));
+        return;
+      }
+      await requireCapability(policyAdapter, ctx, "forms.history", { formId: summary.formId, recordId: summary.recordId, createdBy: summary.createdBy });
       const revisions = await repository.listRecordRevisions({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
       res.status(200).json(revisions);
     } catch (error) {
@@ -716,7 +843,12 @@ export function createFormServer(options?: {
   app.post("/api/records/:recordId/migrations/preview", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.edit");
+      const summary = await repository.getRecordSummaryById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
+      if (!summary) {
+        res.status(404).json(errorEnvelope("RECORD_NOT_FOUND", "Record not found"));
+        return;
+      }
+      await requireCapability(policyAdapter, ctx, "forms.edit", { formId: summary.formId, recordId: summary.recordId, createdBy: summary.createdBy });
 
       const payload = recordMigrationSchema.parse(req.body);
       const revisions = await repository.listRecordRevisions({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
@@ -750,7 +882,12 @@ export function createFormServer(options?: {
   app.post("/api/records/:recordId/migrations/commit", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.edit");
+      const summary = await repository.getRecordSummaryById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
+      if (!summary) {
+        res.status(404).json(errorEnvelope("RECORD_NOT_FOUND", "Record not found"));
+        return;
+      }
+      await requireCapability(policyAdapter, ctx, "forms.edit", { formId: summary.formId, recordId: summary.recordId, createdBy: summary.createdBy });
 
       const payload = recordMigrationSchema.parse(req.body);
       const revisions = await repository.listRecordRevisions({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
@@ -800,7 +937,12 @@ export function createFormServer(options?: {
   app.delete("/api/records/:recordId", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.delete");
+      const summary = await repository.getRecordSummaryById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
+      if (!summary) {
+        res.status(404).json(errorEnvelope("RECORD_NOT_FOUND", "Record not found"));
+        return;
+      }
+      await requireCapability(policyAdapter, ctx, "forms.delete", { formId: summary.formId, recordId: summary.recordId, createdBy: summary.createdBy });
 
       const erased = await repository.deleteRecordAndRevisions({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.recordId);
       let pending = 0;
@@ -820,7 +962,7 @@ export function createFormServer(options?: {
   app.post("/api/maintenance/storage-cleanup", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
-      await requireCapability(policyAdapter, ctx, "forms.delete");
+      await requireCapability(policyAdapter, ctx, "forms.delete", { scopeType: "tenant", scopeId: ctx.tenantId });
       const pendingUploadMaxAge = options?.retentionPolicy?.pendingUploadMaxAgeMs;
       const recordMaxAge = options?.retentionPolicy?.recordMaxAgeMs;
       const recordRetentionMode = options?.retentionPolicy?.recordRetentionMode ?? "archived_forms_only";
@@ -895,8 +1037,11 @@ export function createFormServer(options?: {
         res.status(403).json(errorEnvelope("FORBIDDEN", "Permission denied"));
         return;
       }
-      if (["DRAFT_CONFLICT", "BINDING_CONFLICT", "RECORD_FORM_CONFLICT", "RECORD_DEFINITION_CONFLICT"].includes(error.message)) {
-        res.status(409).json(errorEnvelope(error.message, "The draft or binding changed. Review the current version before retrying."));
+      if (["DRAFT_CONFLICT", "BINDING_CONFLICT", "RECORD_FORM_CONFLICT", "RECORD_DEFINITION_CONFLICT", "RECORD_CONFLICT"].includes(error.message)) {
+        const message = error.message === "RECORD_CONFLICT"
+          ? "The record changed since you loaded it. Reload and retry with the latest revision."
+          : "The draft or binding changed. Review the current version before retrying.";
+        res.status(409).json(errorEnvelope(error.message, message));
         return;
       }
       if (error.message === "IDEMPOTENCY_PAYLOAD_MISMATCH") {
@@ -938,6 +1083,10 @@ export function createFormServer(options?: {
       }
     }
 
+    if (process.env.NODE_ENV !== "production") {
+      // Preserve safe client responses while still surfacing stack traces in development and tests.
+      console.error(error);
+    }
     res.status(500).json(errorEnvelope("INTERNAL_ERROR", "Unexpected error"));
   });
 

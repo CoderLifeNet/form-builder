@@ -20,6 +20,26 @@ export type IdempotencyReplay = {
   response: unknown;
 };
 
+export type RecordSummary = {
+  recordId: string;
+  formId: string;
+  formName: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  currentRevisionId: string | null;
+  currentRevisionNumber: number | null;
+  currentDefinitionId: string | null;
+};
+
+export type RecordListFilters = {
+  formId?: string;
+  createdBy?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  query?: string;
+};
+
 export class MigrationRunner {
   constructor(private readonly pool: Pool) {}
 
@@ -227,6 +247,71 @@ export class FormRepository {
     };
   }
 
+  async listPublishedDefinitionsByForm(ctx: DbContext, formId: string): Promise<Array<{
+    id: string;
+    formId: string;
+    publicationVersion: number;
+    publishedAt: string;
+    fieldCount: number;
+    name: string;
+  }>> {
+    const result = await this.pool.query(
+      `
+      SELECT p.id, p.form_id, p.publication_version, p.definition_json
+      FROM published_definitions p
+      JOIN forms f ON f.id = p.form_id
+      WHERE p.form_id = $1
+        AND f.tenant_id = $2
+      ORDER BY p.publication_version DESC
+      `,
+      [formId, ctx.tenantId]
+    );
+
+    return result.rows.map((row) => {
+      const definition = row.definition_json as PublishedDefinition;
+      return {
+        id: row.id,
+        formId: row.form_id,
+        publicationVersion: Number(row.publication_version),
+        publishedAt: String(definition.publishedAt),
+        fieldCount: definition.fields.length,
+        name: definition.metadata.name
+      };
+    });
+  }
+
+  async getPublishedDefinitionByVersion(ctx: DbContext, formId: string, publicationVersion: number): Promise<{
+    id: string;
+    formId: string;
+    publicationVersion: number;
+    definition: PublishedDefinition;
+  } | null> {
+    const result = await this.pool.query(
+      `
+      SELECT p.id, p.form_id, p.publication_version, p.definition_json
+      FROM published_definitions p
+      JOIN forms f ON f.id = p.form_id
+      WHERE p.form_id = $1
+        AND p.publication_version = $2
+        AND f.tenant_id = $3
+      LIMIT 1
+      `,
+      [formId, publicationVersion, ctx.tenantId]
+    );
+
+    if (!result.rowCount) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      formId: row.form_id,
+      publicationVersion: Number(row.publication_version),
+      definition: row.definition_json as PublishedDefinition
+    };
+  }
+
   async createForm(ctx: DbContext, input: CreateFormInput): Promise<{ formId: string; draftRevision: number }> {
     const validated = validateDefinition(input.draft);
     const formId = input.id ?? createStableId("form");
@@ -414,6 +499,7 @@ export class FormRepository {
     values: Record<string, unknown>;
     selectedLabels: Record<string, string>;
     uploadIds?: string[];
+    expectedRevision?: number;
     transactionClient?: PoolClient;
     explicitMigration?: boolean;
   }): Promise<{ recordId: string; revisionId: string; revisionNumber: number }> {
@@ -460,7 +546,11 @@ export class FormRepository {
         `,
           [recordId]
         );
-        revisionNumber = Number(latest.rows[0].max_revision) + 1;
+        const currentRevisionNumber = Number(latest.rows[0].max_revision);
+        if (input.expectedRevision !== undefined && currentRevisionNumber !== input.expectedRevision) {
+          throw new Error("RECORD_CONFLICT");
+        }
+        revisionNumber = currentRevisionNumber + 1;
       }
 
       const revisionId = createStableId("revision");
@@ -492,23 +582,63 @@ export class FormRepository {
       );
 
       if (input.uploadIds && input.uploadIds.length > 0) {
-        const attach = await client.query(
+        const uploads = await client.query(
           `
-          UPDATE uploads
-          SET status = 'attached',
-              attached_revision_id = $1,
-              updated_at = NOW()
-          WHERE id = ANY($2::text[])
-            AND tenant_id = $3
-            AND status = 'completed'
-            AND form_id = $4
-          RETURNING id
-        `,
-          [revisionId, input.uploadIds, input.ctx.tenantId, input.formId]
+          SELECT u.id, u.status, u.attached_revision_id,
+                 rr.record_id AS attached_record_id
+          FROM uploads u
+          LEFT JOIN record_revisions rr ON rr.id = u.attached_revision_id
+          WHERE u.id = ANY($1::text[])
+            AND u.tenant_id = $2
+            AND u.form_id = $3
+          `,
+          [input.uploadIds, input.ctx.tenantId, input.formId]
         );
 
-        if (attach.rowCount !== input.uploadIds.length) {
+        const uploadById = new Map<string, { status: string; attachedRevisionId: string | null; attachedRecordId: string | null }>();
+        for (const row of uploads.rows) {
+          uploadById.set(String(row.id), {
+            status: String(row.status),
+            attachedRevisionId: row.attached_revision_id ? String(row.attached_revision_id) : null,
+            attachedRecordId: row.attached_record_id ? String(row.attached_record_id) : null
+          });
+        }
+
+        const toAttach: string[] = [];
+        for (const uploadId of input.uploadIds) {
+          const found = uploadById.get(uploadId);
+          if (!found) {
+            throw new Error("UPLOAD_ATTACH_CONFLICT");
+          }
+          if (found.status === "completed" && !found.attachedRevisionId) {
+            toAttach.push(uploadId);
+            continue;
+          }
+          if (found.attachedRevisionId && found.attachedRecordId === recordId) {
+            continue;
+          }
           throw new Error("UPLOAD_ATTACH_CONFLICT");
+        }
+
+        if (toAttach.length > 0) {
+          const attach = await client.query(
+            `
+            UPDATE uploads
+            SET status = 'attached',
+                attached_revision_id = $1,
+                updated_at = NOW()
+            WHERE id = ANY($2::text[])
+              AND tenant_id = $3
+              AND status = 'completed'
+              AND form_id = $4
+            RETURNING id
+            `,
+            [revisionId, toAttach, input.ctx.tenantId, input.formId]
+          );
+
+          if (attach.rowCount !== toAttach.length) {
+            throw new Error("UPLOAD_ATTACH_CONFLICT");
+          }
         }
       }
 
@@ -748,6 +878,100 @@ export class FormRepository {
       values: row.values_json as Record<string, unknown>,
       selectedLabels: row.selected_labels_json as Record<string, string>,
       createdAt: row.created_at.toISOString()
+    }));
+  }
+
+  async getRecordSummaryById(ctx: DbContext, recordId: string): Promise<RecordSummary | null> {
+    const result = await this.pool.query(
+      `
+      SELECT r.id,
+             r.form_id,
+             f.name AS form_name,
+             r.created_by,
+             r.created_at,
+              COALESCE(rr.created_at, r.created_at) AS updated_at,
+             r.current_revision_id,
+             rr.revision_number AS current_revision_number,
+             rr.definition_id AS current_definition_id
+      FROM records r
+      JOIN forms f ON f.id = r.form_id AND f.tenant_id = r.tenant_id
+      LEFT JOIN record_revisions rr ON rr.id = r.current_revision_id
+      WHERE r.id = $1
+        AND r.tenant_id = $2
+      LIMIT 1
+      `,
+      [recordId, ctx.tenantId]
+    );
+
+    if (!result.rowCount) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      recordId: String(row.id),
+      formId: String(row.form_id),
+      formName: String(row.form_name),
+      createdBy: String(row.created_by),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+      currentRevisionId: row.current_revision_id ? String(row.current_revision_id) : null,
+      currentRevisionNumber: row.current_revision_number === null ? null : Number(row.current_revision_number),
+      currentDefinitionId: row.current_definition_id ? String(row.current_definition_id) : null
+    };
+  }
+
+  async listRecordSummaries(
+    ctx: DbContext,
+    options: { offset: number; limit: number; filters?: RecordListFilters }
+  ): Promise<RecordSummary[]> {
+    const filters = options.filters ?? {};
+    const result = await this.pool.query(
+      `
+      SELECT r.id,
+             r.form_id,
+             f.name AS form_name,
+             r.created_by,
+             r.created_at,
+              COALESCE(rr.created_at, r.created_at) AS updated_at,
+             r.current_revision_id,
+             rr.revision_number AS current_revision_number,
+             rr.definition_id AS current_definition_id
+      FROM records r
+      JOIN forms f ON f.id = r.form_id AND f.tenant_id = r.tenant_id
+      LEFT JOIN record_revisions rr ON rr.id = r.current_revision_id
+      WHERE r.tenant_id = $1
+        AND ($2::text IS NULL OR r.form_id = $2)
+        AND ($3::text IS NULL OR r.created_by = $3)
+        AND ($4::timestamptz IS NULL OR r.created_at >= $4::timestamptz)
+        AND ($5::timestamptz IS NULL OR r.created_at <= $5::timestamptz)
+        AND ($6::text IS NULL OR r.id ILIKE ('%' || $6 || '%') OR f.name ILIKE ('%' || $6 || '%'))
+      ORDER BY r.created_at DESC, r.id DESC
+      OFFSET $7
+      LIMIT $8
+      `,
+      [
+        ctx.tenantId,
+        filters.formId ?? null,
+        filters.createdBy ?? null,
+        filters.createdFrom ?? null,
+        filters.createdTo ?? null,
+        filters.query ?? null,
+        options.offset,
+        options.limit
+      ]
+    );
+
+    return result.rows.map((row) => ({
+      recordId: String(row.id),
+      formId: String(row.form_id),
+      formName: String(row.form_name),
+      createdBy: String(row.created_by),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+      currentRevisionId: row.current_revision_id ? String(row.current_revision_id) : null,
+      currentRevisionNumber: row.current_revision_number === null ? null : Number(row.current_revision_number),
+      currentDefinitionId: row.current_definition_id ? String(row.current_definition_id) : null
     }));
   }
 

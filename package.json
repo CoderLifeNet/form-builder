@@ -23,6 +23,7 @@
     "db:migrate": "npm run db:migrate -w @coderlifenet/form-postgres",
     "db:seed": "npm run db:seed -w @coderlifenet/form-postgres",
     "test:browser": "playwright test",
+    "test:browser:workspace": "playwright test -c playwright.workspace.config.ts",
     "test:integration": "node scripts/test-integration.mjs"
   },
   "devDependencies": {
