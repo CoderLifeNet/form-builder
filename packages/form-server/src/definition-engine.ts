@@ -208,6 +208,9 @@ export function exportDefinitionEnvelope(definition: FormDefinition): {
 }
 
 export function importDefinitionEnvelope(input: unknown): FormDefinition {
+  if (new TextEncoder().encode(JSON.stringify(input ?? null)).length > 1048576) {
+    throw new Error("IMPORT_TOO_LARGE");
+  }
   assertSafeInput(input);
   const schema = z.object({
     formatVersion: z.literal(1),

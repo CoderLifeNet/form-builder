@@ -4,6 +4,47 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: unfinished acceptance closure pass (2026-10-13)
+
+Branch: `feat/ui-0.2-integration` (PR #1 review branch preserved).
+
+This pass focused on unfinished acceptance IDs A04/A09/A12/A13/A15/A16/A18/A19/A21 without changing publication boundaries, the pinned `@coderlifenet/ui-core` + `@coderlifenet/ui-components` `0.2.0-alpha.0` pair, host-owned analytics, autosave continuity, immutable publications, historical rendering, API field errors, or transactional idempotent submission behavior.
+
+Implemented and verified in this pass:
+
+- Renderer recovery/error-path coverage for session-expired and permission-revoked responses, plus pending-submit duplicate suppression.
+- Renderer option-refresh continuity coverage to assert saved selection preservation and non-reapplication of defaults during refresh paths.
+- Upload UI coverage for retry and cancellation behavior in addition to existing multi-file persistence checks.
+- Server route coverage for binding save/resolve/reset optimistic conflict behavior.
+- Server route coverage for dependency reconciliation blocking (`DEPENDENCIES_UNRESOLVED`) before publish.
+- Server route coverage for archive/restore and historical-upload deletion protection (`UPLOAD_IN_HISTORY`).
+- Import hardening: explicit oversized-envelope rejection (`IMPORT_TOO_LARGE` -> `UNSAFE_INPUT`) in import pipeline and unit coverage for malformed/unsafe payload rejection.
+
+### Commands and current results
+
+| Command | Result |
+| --- | --- |
+| `npm install` | PASS (local dependency restoration for test tooling). |
+| `npm run build -w @coderlifenet/form-core && npm run build -w @coderlifenet/form-postgres && npm run build -w @coderlifenet/form-server && npm run build -w @coderlifenet/form-react && npm run build -w @coderlifenet/form-builder` | PASS. |
+| `npm run typecheck` | PASS across workspace packages and both example apps. |
+| `npm test` | PASS in default fixture/mock profile; DB integration suites intentionally skipped without `FORM_RUN_DB_TESTS=true`. |
+| `env -u FORM_TEST_DB_URL npm run test:integration` | Expected refusal (exit 1): dedicated `FORM_TEST_DB_URL` is required and `FORM_DB_URL` is ignored by design. |
+| `npm run test:browser` | PASS: 12 Playwright checks across desktop + narrow viewports, WCAG tags, keyboard traversal, responsive overflow checks, and history keyboard operability. |
+
+### Acceptance delta for requested unfinished IDs
+
+| ID | Status after this pass | Evidence |
+| --- | --- | --- |
+| A04 | PARTIAL | Trusted source resolution and stale-option continuity are covered in renderer/server tests, including preserved saved selections during refresh; full dedicated DB-backed end-to-end execution remains pending. |
+| A09 | PARTIAL | Binding save/resolve/reset conflict behavior is now covered at server route level; native PostgreSQL integration execution remains pending in this environment. |
+| A12 | PASS | Conflict/recovery matrix improved with autosave serialization tests, stale async protection tests, 401/403 truthful recovery messaging, and pending-submit duplicate suppression. |
+| A13 | PASS | Upload restrictions/retry/cancel, attached-history deletion protection, and cleanup retry paths now have explicit coverage. |
+| A15 | PARTIAL | Publish blocking on unresolved capability dependencies is covered; full replacement-import reconciliation flow with dedicated DB integration run remains pending. |
+| A16 | PASS | Malformed/unsafe/oversized import paths and unsafe pattern validation are now explicitly enforced and tested. |
+| A18 | PASS | Archive/restore plus authorized retention/erasure cleanup and failure-retry behavior are now covered by server tests. |
+| A19 | PARTIAL | Sequential upgrade tests exist but still require execution with dedicated `FORM_TEST_DB_URL`; native PostgreSQL multi-connection concurrency verification remains outstanding. |
+| A21 | PASS | Automated WCAG + keyboard + responsive checks now run in browser automation across manager/builder/capture/history in desktop and narrow viewports. Human accessibility review remains pending by definition. |
+
 ## Continuation: test profiles and record-save recovery (2026-10-13)
 
 Review: https://github.com/CoderLifeNet/form-builder/pull/1 (draft).

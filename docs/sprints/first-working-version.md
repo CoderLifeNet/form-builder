@@ -91,6 +91,10 @@ implementation branch. Added typed API field-error/permission recovery, stable
 lost-response submission keys, pending-submit protection and transactional record
 save/replay persistence. Normal tests now use fixtures/mocks only. Dedicated
 SQL/API tests require the explicit integration command and `FORM_TEST_DB_URL`.
-The report records current verification and distinguishes portable PostgreSQL
-checks from outstanding native concurrency coverage. All nine partial acceptance
-items remain partial; this checkpoint does not declare the engine complete.
+The report now distinguishes default-profile evidence from outstanding native
+PostgreSQL coverage. All nine previously partial acceptance IDs were revisited
+in this branch. A12/A13/A16/A18/A21 now have direct
+automated evidence in default test/browser profiles. A04/A09/A15/A19 still
+require dedicated native-PostgreSQL integration execution (`FORM_TEST_DB_URL`)
+to close with full end-to-end confidence, and native PostgreSQL concurrency
+verification remains explicitly outstanding.
