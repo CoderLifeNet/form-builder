@@ -1,5 +1,6 @@
 import request from "supertest";
 import { describe, expect, it } from "vitest";
+import { Readable } from "node:stream";
 import { createFormServer, PolicyAdapter } from "./index.js";
 
 const definition = {
@@ -57,7 +58,9 @@ function makeRepositoryStub() {
       fileName: "demo.txt",
       contentType: "text/plain",
       sizeBytes: 5,
-      objectKey: "tenant_demo/upload_1-a1b2"
+      objectKey: "tenant_demo/upload_1-a1b2",
+      createdBy: "owner1",
+      attachedRecordId: null
     }),
     markUploadDeletionPending: async () => undefined,
     deleteUploadRow: async () => undefined,
@@ -158,6 +161,101 @@ describe("form server", () => {
     expect(response.body.sizeBytes).toBe(5);
   });
 
+  it("passes uploader context when authorizing unattached upload downloads", async () => {
+    const app = createFormServer({
+      repository: {
+        ...makeRepositoryStub(),
+        getUploadById: async () => ({
+          id: "upload_1",
+          tenantId: "tenant_demo",
+          formId: "f1",
+          objectKey: "tenant_demo/upload_1-a1b2",
+          fileName: "demo.txt",
+          contentType: "text/plain",
+          sizeBytes: 5,
+          status: "completed",
+          createdBy: "uploader_2",
+          attachedRevisionId: null,
+          attachedRecordId: null
+        })
+      } as any,
+      policyAdapter: {
+        resolveContext: async () => ({ tenantId: "tenant_demo", actorId: "viewer1", isAnonymous: false }),
+        authorize: async (_ctx, capability, resource) => {
+          if (capability !== "forms.read") {
+            return { allowed: false, capabilities: [] };
+          }
+          if (resource?.uploadId && resource?.createdBy === "uploader_2") {
+            return { allowed: false, capabilities: ["forms.read"] };
+          }
+          return { allowed: true, capabilities: ["forms.read"] };
+        }
+      },
+      uploadStorage: {
+        storeObject: async () => ({ objectKey: "unused", sizeBytes: 0 }),
+        getObject: async () => ({ stream: Readable.from(Buffer.from("hello")), sizeBytes: 5, contentType: "text/plain" }),
+        deleteObject: async () => undefined
+      }
+    });
+
+    const response = await request(app).get("/api/uploads/upload_1/download");
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe("FORBIDDEN");
+  });
+
+  it("authorizes attached upload downloads using owning-record resource context", async () => {
+    const app = createFormServer({
+      repository: {
+        ...makeRepositoryStub(),
+        getUploadById: async () => ({
+          id: "upload_2",
+          tenantId: "tenant_demo",
+          formId: "f1",
+          objectKey: "tenant_demo/upload_2-a1b2",
+          fileName: "evidence.pdf",
+          contentType: "application/pdf",
+          sizeBytes: 8,
+          status: "completed",
+          createdBy: "collab1",
+          attachedRevisionId: "rev2",
+          attachedRecordId: "record_denied"
+        }),
+        getRecordSummaryById: async () => ({
+          recordId: "record_denied",
+          formId: "f1",
+          formName: "Form",
+          createdBy: "collab1",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          currentRevisionId: "rev2",
+          currentRevisionNumber: 2,
+          currentDefinitionId: "d1"
+        })
+      } as any,
+      policyAdapter: {
+        resolveContext: async () => ({ tenantId: "tenant_demo", actorId: "viewer1", isAnonymous: false }),
+        authorize: async (_ctx, capability, resource) => {
+          if (capability !== "forms.read") {
+            return { allowed: false, capabilities: [] };
+          }
+          if (resource?.recordId === "record_denied") {
+            return { allowed: false, capabilities: ["forms.read"] };
+          }
+          return { allowed: true, capabilities: ["forms.read"] };
+        }
+      },
+      uploadStorage: {
+        storeObject: async () => ({ objectKey: "unused", sizeBytes: 0 }),
+        getObject: async () => ({ stream: Readable.from(Buffer.from("%PDF-1.7")), sizeBytes: 8, contentType: "application/pdf" }),
+        deleteObject: async () => undefined
+      }
+    });
+
+    const response = await request(app).get("/api/uploads/upload_2/download");
+    expect(response.status).toBe(403);
+    expect(response.body.code).toBe("FORBIDDEN");
+  });
+
   it("exposes binding save/resolve/reset with optimistic revision checks", async () => {
     let revision = 0;
     const resolved = { source: { type: "workspace", id: "w1" }, revision: 0, mode: "latest" as const, definitionId: "d1", formId: "f1" };
@@ -254,7 +352,9 @@ describe("form server", () => {
           contentType: "text/plain",
           sizeBytes: 5,
           objectKey: "tenant_demo/upload_1-a1b2",
-          attachedRevisionId: "rev_1"
+          createdBy: "owner1",
+          attachedRevisionId: "rev_1",
+          attachedRecordId: "record_1"
         })
       } as any,
       policyAdapter: allowCapabilities(["forms.delete"])
@@ -311,15 +411,20 @@ describe("form server", () => {
     expect(exact.body.id).toBe("d1");
   });
 
-  it("filters record discovery by resource authorization before pagination", async () => {
+  it("paginates record discovery without skipping unconsumed authorized rows", async () => {
     const app = createFormServer({
       repository: {
         ...makeRepositoryStub(),
         listRecordSummaries: async (_ctx: unknown, options: { offset: number; limit: number }) => {
           const all = [
-            { recordId: "r3", formId: "f3", formName: "Form 3", createdBy: "owner3", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev3", currentRevisionNumber: 3, currentDefinitionId: "d3" },
-            { recordId: "r2", formId: "f2", formName: "Form 2", createdBy: "owner2", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev2", currentRevisionNumber: 2, currentDefinitionId: "d2" },
-            { recordId: "r1", formId: "f1", formName: "Form 1", createdBy: "owner1", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev1", currentRevisionNumber: 1, currentDefinitionId: "d1" }
+            { recordId: "r1", formId: "f1", formName: "Form 1", createdBy: "owner1", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev1", currentRevisionNumber: 1, currentDefinitionId: "d1" },
+            { recordId: "r2", formId: "f1", formName: "Form 1", createdBy: "owner2", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev2", currentRevisionNumber: 2, currentDefinitionId: "d1" },
+            { recordId: "r3", formId: "f1", formName: "Form 1", createdBy: "owner3", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev3", currentRevisionNumber: 3, currentDefinitionId: "d1" },
+            { recordId: "r4", formId: "f1", formName: "Form 1", createdBy: "owner4", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev4", currentRevisionNumber: 4, currentDefinitionId: "d1" },
+            { recordId: "r5", formId: "f1", formName: "Form 1", createdBy: "owner5", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev5", currentRevisionNumber: 5, currentDefinitionId: "d1" },
+            { recordId: "r6", formId: "f1", formName: "Form 1", createdBy: "owner6", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev6", currentRevisionNumber: 6, currentDefinitionId: "d1" },
+            { recordId: "r7", formId: "f1", formName: "Form 1", createdBy: "owner7", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev7", currentRevisionNumber: 7, currentDefinitionId: "d1" },
+            { recordId: "r8", formId: "f1", formName: "Form 1", createdBy: "owner8", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), currentRevisionId: "rev8", currentRevisionNumber: 8, currentDefinitionId: "d1" }
           ];
           return all.slice(options.offset, options.offset + options.limit);
         }
@@ -330,7 +435,7 @@ describe("form server", () => {
           if (capability !== "forms.read") {
             return { allowed: false, capabilities: [] };
           }
-          if (resource?.recordId === "r2") {
+          if (resource?.recordId === "r2" || resource?.recordId === "r5") {
             return { allowed: false, capabilities: ["forms.read"] };
           }
           return { allowed: true, capabilities: ["forms.read"] };
@@ -338,9 +443,23 @@ describe("form server", () => {
       }
     });
 
-    const response = await request(app).get("/api/records?pageSize=2");
-    expect(response.status).toBe(200);
-    expect(response.body.items.map((item: { recordId: string }) => item.recordId)).toEqual(["r3", "r1"]);
+    const page1 = await request(app).get("/api/records?pageSize=2&cursor=0");
+    expect(page1.status).toBe(200);
+    expect(page1.body.items.map((item: { recordId: string }) => item.recordId)).toEqual(["r1", "r3"]);
+    expect(page1.body.nextCursor).toBe(3);
+
+    const page2 = await request(app).get(`/api/records?pageSize=2&cursor=${page1.body.nextCursor}`);
+    expect(page2.status).toBe(200);
+    expect(page2.body.items.map((item: { recordId: string }) => item.recordId)).toEqual(["r4", "r6"]);
+
+    const page3 = await request(app).get(`/api/records?pageSize=2&cursor=${page2.body.nextCursor}`);
+    expect(page3.status).toBe(200);
+    expect(page3.body.items.map((item: { recordId: string }) => item.recordId)).toEqual(["r7", "r8"]);
+    expect(page3.body.nextCursor).toBeNull();
+
+    const allPermitted = [...page1.body.items, ...page2.body.items, ...page3.body.items].map((item: { recordId: string }) => item.recordId);
+    expect(allPermitted).toEqual(["r1", "r3", "r4", "r6", "r7", "r8"]);
+    expect(new Set(allPermitted).size).toBe(allPermitted.length);
   });
 });
 

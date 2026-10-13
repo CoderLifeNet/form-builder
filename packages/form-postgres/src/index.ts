@@ -726,14 +726,27 @@ export class FormRepository {
     contentType: string;
     sizeBytes: number;
     status: string;
+    createdBy: string;
     attachedRevisionId: string | null;
+    attachedRecordId: string | null;
   } | null> {
     const result = await this.pool.query(
       `
-      SELECT id, tenant_id, form_id, object_key, file_name, content_type, size_bytes, status, attached_revision_id
-      FROM uploads
-      WHERE id = $1
-        AND tenant_id = $2
+      SELECT u.id,
+             u.tenant_id,
+             u.form_id,
+             u.object_key,
+             u.file_name,
+             u.content_type,
+             u.size_bytes,
+             u.status,
+             u.created_by,
+             u.attached_revision_id,
+             rr.record_id AS attached_record_id
+      FROM uploads u
+      LEFT JOIN record_revisions rr ON rr.id = u.attached_revision_id
+      WHERE u.id = $1
+        AND u.tenant_id = $2
     `,
       [uploadId, ctx.tenantId]
     );
@@ -752,7 +765,9 @@ export class FormRepository {
       contentType: row.content_type,
       sizeBytes: Number(row.size_bytes),
       status: row.status,
-      attachedRevisionId: row.attached_revision_id
+      createdBy: String(row.created_by),
+      attachedRevisionId: row.attached_revision_id,
+      attachedRecordId: row.attached_record_id ? String(row.attached_record_id) : null
     };
   }
 

@@ -4,6 +4,42 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: bounded correctness pass on feat/ui-0.2-integration (2026-10-13)
+
+Branch: `feat/ui-0.2-integration`.
+
+Bounded fixes completed in this pass:
+
+- GET `/api/records` pagination now advances cursor by consumed rows (not raw scanned rows), preserving unconsumed authorized rows for subsequent pages.
+- History-to-edit targeting in workspace host now binds `Edit latest record` to the active history record (`historyRecordId`) instead of defaulting to `submissions[0]`.
+- Attachment download authorization now resolves record context for attached uploads and uploader context for unattached uploads.
+
+Regression coverage added/updated:
+
+- `packages/form-server/src/index.test.ts`
+  - pagination exact-once coverage across mixed allow/deny records and multi-page traversal.
+  - unattached upload authorization uses uploader context (`createdBy`).
+  - attached upload authorization uses owning record context (`recordId`).
+- `packages/form-server/src/acceptance.integration.test.ts`
+  - same-form same-tenant attachment scenario with one allowed viewer download and one denied viewer download.
+- `apps/example-workspace/src/App.tsx` + `tests/browser/workspace-reference.spec.ts`
+  - history-to-edit path now edits the chosen historical record and asserts the other record remains unchanged.
+
+Verification evidence for this bounded pass:
+
+| Command | Result |
+| --- | --- |
+| `npm run test -w @coderlifenet/form-server` | PASS: 19 passed, 0 failed, 7 skipped. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:integration` | PASS: `@coderlifenet/form-postgres` 6 passed, `@coderlifenet/form-server` acceptance 7 passed. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:browser:workspace` | PASS: Playwright workspace suite 1 passed, 0 failed. |
+| `npm run build -w @coderlifenet/form-postgres && npm run typecheck && npm run build && npm run pack:artifacts && npm run verify:consumer` | PASS end-to-end final gate (typecheck, build, package tarballs, consumer verification). |
+
+Scope status:
+
+- Functional blockers in requested scope: none found.
+- Verification blockers in requested scope: none found.
+- Out-of-scope residuals remain unchanged from prior report sections.
+
 ## Continuation: reusable lifecycle gap closure (2026-10-13)
 
 Branch: `feat/ui-0.2-integration`.

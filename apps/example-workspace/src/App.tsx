@@ -170,6 +170,7 @@ export function App(): ReactElement {
   draftRevision.current = activeDraft?.revision ?? 0;
   const [activeDefinition, setActiveDefinition] = useState<ApiDefinition | null>(null);
   const [recordHistory, setRecordHistory] = useState<ApiRecordRevision[]>([]);
+  const [historyRecordId, setHistoryRecordId] = useState<string | null>(null);
   const [historyDefinitions, setHistoryDefinitions] = useState<Record<string, FormDefinition>>({});
   const [captureRecordId, setCaptureRecordId] = useState<string | undefined>(undefined);
   const [captureExpectedRevision, setCaptureExpectedRevision] = useState<number | undefined>(undefined);
@@ -301,6 +302,7 @@ export function App(): ReactElement {
     setCaptureExpectedRevision(undefined);
     setCaptureInitialValues(undefined);
     setRecordHistory([]);
+    setHistoryRecordId(null);
     setHistoryDefinitions({});
     setSubmissions([]);
     setSubmissionsCursor(null);
@@ -373,6 +375,7 @@ export function App(): ReactElement {
     );
     const latestDefinition = await api<ApiDefinition>(`/api/definitions/${revisions[0].definitionId}`);
     setActiveDefinition(latestDefinition);
+    setHistoryRecordId(recordId);
     setHistoryDefinitions(Object.fromEntries(definitions));
     setRecordHistory(revisions);
     setView("history");
@@ -842,15 +845,11 @@ export function App(): ReactElement {
         {view === "history" && recordHistory.length > 0 && activeDefinition ? (
           <Stack spacing={1.5}>
             <Button type="button" variant="outlined" onClick={async () => {
-              if (!submissions.length) {
-                await loadSubmissions(true);
-              }
-              const target = submissions[0];
-              if (!target) {
-                setStatus("No submission is available to edit.");
+              if (!historyRecordId) {
+                setStatus("No history record is available to edit.");
                 return;
               }
-              await openEditRecord(target.recordId);
+              await openEditRecord(historyRecordId);
             }}>Edit latest record</Button>
             <RecordHistoryView
               definition={activeDefinition.definition}

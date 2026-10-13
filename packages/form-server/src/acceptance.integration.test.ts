@@ -34,6 +34,8 @@ const identityCapabilities = new Map<string, string[]>([
 ]);
 
 const viewerAllowedForms = new Set<string>();
+const viewerAllowedRecords = new Set<string>();
+const viewerAllowedUploads = new Set<string>();
 
 function makePolicyAdapter(): PolicyAdapter {
   return {
@@ -78,8 +80,21 @@ function makeResourceAwarePolicyAdapter(): PolicyAdapter {
         return { allowed: false, capabilities };
       }
 
-      if (ctx.actorId === "viewer1" && resource?.formId && !viewerAllowedForms.has(resource.formId)) {
-        return { allowed: false, capabilities };
+      if (ctx.actorId === "viewer1") {
+        if (resource?.uploadId) {
+          if (!viewerAllowedUploads.has(resource.uploadId)) {
+            return { allowed: false, capabilities };
+          }
+        }
+        if (resource?.recordId) {
+          if (!viewerAllowedRecords.has(resource.recordId)) {
+            return { allowed: false, capabilities };
+          }
+        } else if (resource?.createdBy && resource.createdBy !== "owner1") {
+          return { allowed: false, capabilities };
+        } else if (resource?.formId && !viewerAllowedForms.has(resource.formId)) {
+          return { allowed: false, capabilities };
+        }
       }
 
       return {
@@ -777,6 +792,10 @@ integration("form server acceptance integration", () => {
     const viewer = { actorId: "viewer1", tenantId: "tenant_alpha" };
     const outsider = { actorId: "owner2", tenantId: "tenant_beta" };
 
+    viewerAllowedForms.clear();
+    viewerAllowedRecords.clear();
+    viewerAllowedUploads.clear();
+
     const definitionV1: FormDefinition = {
       metadata: {
         formId: createStableId("meta"),
@@ -834,6 +853,17 @@ integration("form server acceptance integration", () => {
     );
     expect(uploaded.status).toBe(201);
 
+    const uploadedCollab = await withIdentity(
+      request(app)
+        .post(`/api/forms/${formId}/uploads`)
+        .set("content-type", "application/octet-stream")
+        .set("x-file-name", "collab-evidence.pdf")
+        .set("x-file-content-type", "application/pdf")
+        .send(Buffer.from("%PDF-1.7\n2 0 obj\n<<>>\nendobj\n")),
+      collab
+    );
+    expect(uploadedCollab.status).toBe(201);
+
     const ownerSubmission = await withIdentity(
       request(app)
         .post("/api/records")
@@ -848,6 +878,7 @@ integration("form server acceptance integration", () => {
     );
     expect(ownerSubmission.status).toBe(201);
     const recordId = ownerSubmission.body.recordId as string;
+    viewerAllowedUploads.add(uploaded.body.uploadId as string);
 
     const draft = await withIdentity(request(app).get(`/api/forms/${formId}/draft`), owner);
     const definitionV2 = {
@@ -893,6 +924,8 @@ integration("form server acceptance integration", () => {
       collab
     );
     expect(collabSubmission.status).toBe(201);
+
+    viewerAllowedRecords.add(ownerSubmission.body.recordId as string);
 
     const versions = await withIdentity(request(app).get(`/api/forms/${formId}/versions`), owner);
     expect(versions.status).toBe(200);
@@ -972,6 +1005,30 @@ integration("form server acceptance integration", () => {
 
     const ownerDownload = await withIdentity(request(app).get(`/api/uploads/${uploaded.body.uploadId}/download`), owner);
     expect(ownerDownload.status).toBe(200);
+
+    const viewerAllowedDownload = await withIdentity(request(app).get(`/api/uploads/${uploaded.body.uploadId}/download`), viewer);
+    expect(viewerAllowedDownload.status).toBe(200);
+
+    const collabUploadRecord = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", createStableId("idem"))
+        .send({
+          formId,
+          definitionId: publishV2.body.definitionId,
+          values: {
+            field_title: "collab attachment record",
+            field_attachment: uploadedCollab.body.uploadId,
+            field_follow_up: "with attachment"
+          },
+          uploadIds: [uploadedCollab.body.uploadId]
+        }),
+      collab
+    );
+    expect(collabUploadRecord.status).toBe(201);
+
+    const viewerDeniedDownload = await withIdentity(request(app).get(`/api/uploads/${uploadedCollab.body.uploadId}/download`), viewer);
+    expect(viewerDeniedDownload.status).toBe(403);
 
     const outsiderDownload = await withIdentity(request(app).get(`/api/uploads/${uploaded.body.uploadId}/download`), outsider);
     expect(outsiderDownload.status).toBe(404);

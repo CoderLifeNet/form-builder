@@ -163,6 +163,9 @@ test("workspace reference host supports persisted submissions, read-only renderi
   await expect(page.getByText(seeded.ownerRecordId)).toBeVisible();
   await expect(page.getByText(seeded.collabRecordId)).toBeVisible();
 
+  const firstCardId = await page.locator("[data-testid^='submission-']").first().getAttribute("data-testid");
+  expect(firstCardId).not.toBe(`submission-${seeded.ownerRecordId}`);
+
   const ownerRow = page.getByTestId(`submission-${seeded.ownerRecordId}`);
 
   await ownerRow.getByRole("button", { name: "Read only", exact: true }).click();
@@ -172,16 +175,24 @@ test("workspace reference host supports persisted submissions, read-only renderi
   await page.getByRole("button", { name: "Submissions", exact: true }).click();
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
 
-  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "Edit", exact: true }).click();
-  await page.getByLabel("Title").fill("Owner edited title");
+  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "History", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Revision history" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit latest record", exact: true }).click();
+  await page.getByLabel("Title").fill("Owner edited title via history");
   await page.getByRole("button", { name: "Submit", exact: true }).click();
 
   await page.getByRole("button", { name: "Submissions", exact: true }).click();
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
 
+  await page.getByTestId(`submission-${seeded.collabRecordId}`).getByRole("button", { name: "Read only", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Read-only rendering" })).toBeVisible();
+  await expect(page.getByLabel("Title")).toHaveValue("Collaborator seeded record");
+
+  await page.getByRole("button", { name: "Submissions", exact: true }).click();
+  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
   await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "History", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Revision history" })).toBeVisible();
-  await expect(page.getByText("Owner edited title")).toBeVisible();
+  await expect(page.getByText("Owner edited title via history")).toBeVisible();
 
   await page.getByRole("button", { name: "Submissions", exact: true }).click();
   await page.reload();

@@ -635,7 +635,25 @@ export function createFormServer(options?: {
         return;
       }
 
-      await requireCapability(policyAdapter, ctx, "forms.read", { formId: upload.formId, uploadId: upload.id });
+      if (upload.attachedRecordId) {
+        const summary = await repository.getRecordSummaryById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, upload.attachedRecordId);
+        if (!summary) {
+          res.status(404).json(errorEnvelope("UPLOAD_NOT_FOUND", "Upload not found"));
+          return;
+        }
+        await requireCapability(policyAdapter, ctx, "forms.read", {
+          formId: summary.formId,
+          recordId: summary.recordId,
+          createdBy: summary.createdBy,
+          uploadId: upload.id
+        });
+      } else {
+        await requireCapability(policyAdapter, ctx, "forms.read", {
+          formId: upload.formId,
+          createdBy: upload.createdBy,
+          uploadId: upload.id
+        });
+      }
 
       const object = await uploadStorage.getObject({
         tenantId: ctx.tenantId,
@@ -796,10 +814,10 @@ export function createFormServer(options?: {
           { tenantId: ctx.tenantId, actorId: ctx.actorId },
           { offset: scanned, limit: batchSize, filters }
         );
-        scanned += batch.length;
-        hasMore = batch.length === batchSize;
+        let consumedInBatch = 0;
 
         for (const record of batch) {
+          consumedInBatch += 1;
           const decision = await policyAdapter.authorize(ctx, "forms.read", {
             formId: record.formId,
             recordId: record.recordId,
@@ -813,6 +831,9 @@ export function createFormServer(options?: {
             break;
           }
         }
+
+        scanned += consumedInBatch;
+        hasMore = consumedInBatch < batch.length || batch.length === batchSize;
       }
 
       res.status(200).json({
