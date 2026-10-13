@@ -1,4 +1,4 @@
-name: Package Publish Preparation
+name: Publish Form Builder
 
 on:
   workflow_dispatch:
@@ -39,7 +39,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate publishable package versions and internal dependency sync
+      - name: Validate form-builder release metadata
         run: |
           node --input-type=module <<'NODE'
           import fs from 'node:fs';
@@ -47,29 +47,21 @@ jobs:
 
           const releaseVersion = process.env.RELEASE_VERSION;
           const root = process.cwd();
-          const packages = [
-            ['@coderlifenet/form-core', 'packages/form-core/package.json', []],
-            ['@coderlifenet/form-postgres', 'packages/form-postgres/package.json', ['@coderlifenet/form-core']],
-            ['@coderlifenet/form-server', 'packages/form-server/package.json', ['@coderlifenet/form-core', '@coderlifenet/form-postgres']],
-            ['@coderlifenet/form-react', 'packages/form-react/package.json', ['@coderlifenet/form-core']],
-            ['@coderlifenet/form-builder', 'packages/form-builder/package.json', ['@coderlifenet/form-core']]
-          ];
-
           const errors = [];
-          for (const [name, relativePath, internalDeps] of packages) {
-            const pkg = JSON.parse(fs.readFileSync(path.join(root, relativePath), 'utf8'));
-            if (pkg.version !== releaseVersion) {
-              errors.push(`${name} version ${pkg.version} does not match expected ${releaseVersion}`);
-            }
-            for (const depName of internalDeps) {
-              const depVersion = pkg.dependencies?.[depName];
-              if (depVersion !== releaseVersion) {
-                errors.push(`${name} dependency ${depName}=${depVersion ?? 'missing'} does not match expected ${releaseVersion}`);
-              }
-            }
-            const publishConfig = pkg.publishConfig ?? {};
-            if (publishConfig.access !== 'public' || publishConfig.tag !== 'alpha') {
-              errors.push(`${name} publishConfig must set access=public and tag=alpha`);
+          const publishPackage = JSON.parse(fs.readFileSync(path.join(root, 'packages/form-builder/package.json'), 'utf8'));
+          if (publishPackage.version !== releaseVersion) {
+            errors.push(`@coderlifenet/form-builder version ${publishPackage.version} does not match expected ${releaseVersion}`);
+          }
+          if (publishPackage.private !== false) {
+            errors.push('@coderlifenet/form-builder must remain private=false for publication');
+          }
+          const publishConfig = publishPackage.publishConfig ?? {};
+          if (publishConfig.access !== 'public' || publishConfig.tag !== 'alpha') {
+            errors.push('@coderlifenet/form-builder publishConfig must set access=public and tag=alpha');
+          }
+          for (const dep of ['@coderlifenet/form-core', '@coderlifenet/form-postgres', '@coderlifenet/form-react', '@coderlifenet/form-server']) {
+            if (publishPackage.dependencies?.[dep]) {
+              errors.push(`@coderlifenet/form-builder must not depend on unpublished package ${dep}`);
             }
           }
 
@@ -82,7 +74,7 @@ jobs:
             if (pkg.private !== true) {
               errors.push(`${relativePath} must remain private=true`);
             }
-            for (const depName of ['@coderlifenet/form-builder', '@coderlifenet/form-react']) {
+            for (const depName of ['@coderlifenet/form-builder']) {
               const depVersion = pkg.dependencies?.[depName];
               if (depVersion !== releaseVersion) {
                 errors.push(`${relativePath} dependency ${depName}=${depVersion ?? 'missing'} must match ${releaseVersion}`);
@@ -95,19 +87,32 @@ jobs:
             errors.push('Root package.json must remain private=true');
           }
 
+          const internalOnlyPackages = [
+            'packages/form-core/package.json',
+            'packages/form-postgres/package.json',
+            'packages/form-server/package.json',
+            'packages/form-react/package.json'
+          ];
+          for (const relativePath of internalOnlyPackages) {
+            const pkg = JSON.parse(fs.readFileSync(path.join(root, relativePath), 'utf8'));
+            if (pkg.private !== true) {
+              errors.push(`${relativePath} must remain private=true`);
+            }
+          }
+
           if (errors.length > 0) {
             for (const error of errors) {
               console.error(`ERROR: ${error}`);
             }
             process.exit(1);
           }
-          console.log(`Validated lockstep package metadata for ${releaseVersion}.`);
+          console.log(`Validated single-package release metadata for ${releaseVersion}.`);
           NODE
 
       - name: Validate source
         run: |
-          npm run typecheck
           npm run build
+          npm run typecheck
 
       - name: Prepare release artifacts
         run: |
@@ -116,13 +121,9 @@ jobs:
 
       - name: Dry-run publish preparation (default)
         run: |
-          for pkg in core postgres server react builder; do
-            npm publish "tmp/packs/coderlifenet-form-${pkg}-${RELEASE_VERSION}.tgz" --access public --tag alpha --provenance --dry-run
-          done
+          npm publish "tmp/packs/coderlifenet-form-builder-${RELEASE_VERSION}.tgz" --access public --tag alpha --provenance --dry-run
 
       - name: Publish to npm with trusted publishing and provenance
         if: ${{ inputs.publish }}
         run: |
-          for pkg in core postgres server react builder; do
-            npm publish "tmp/packs/coderlifenet-form-${pkg}-${RELEASE_VERSION}.tgz" --access public --tag alpha --provenance
-          done
+          npm publish "tmp/packs/coderlifenet-form-builder-${RELEASE_VERSION}.tgz" --access public --tag alpha --provenance

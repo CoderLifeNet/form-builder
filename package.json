@@ -13,10 +13,10 @@
     "npm": ">=10.9.8"
   },
   "scripts": {
-    "build": "npm run build -w @coderlifenet/form-core && npm run build -w @coderlifenet/form-postgres && npm run build -w @coderlifenet/form-server && npm run build -w @coderlifenet/form-react && npm run build -w @coderlifenet/form-builder && npm run build -w example-minimal && npm run build -w example-workspace",
+    "build": "npm run build -w @coderlifenet/form-builder && npm run build -w example-minimal && npm run build -w example-workspace",
     "test": "npm run test -ws --if-present",
     "typecheck": "npm run typecheck -ws --if-present",
-    "pack:artifacts": "rm -rf tmp/packs && mkdir -p tmp/packs && npm pack -w @coderlifenet/form-core --pack-destination tmp/packs && npm pack -w @coderlifenet/form-postgres --pack-destination tmp/packs && npm pack -w @coderlifenet/form-server --pack-destination tmp/packs && npm pack -w @coderlifenet/form-react --pack-destination tmp/packs && npm pack -w @coderlifenet/form-builder --pack-destination tmp/packs",
+    "pack:artifacts": "rm -rf tmp/packs && mkdir -p tmp/packs && npm pack -w @coderlifenet/form-builder --pack-destination tmp/packs",
     "verify:consumer": "npm run verify -w consumer-smoke",
     "dev:infra": "docker compose up -d postgres",
     "dev:infra:down": "docker compose down -v",

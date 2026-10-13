@@ -102,7 +102,7 @@ It no longer passes merely because tarball files exist.
 
 ## API errors and safe retries
 
-The browser-only `createFormApiClient` export from `@coderlifenet/form-react`
+The browser-only `createFormApiClient` export from `@coderlifenet/form-builder/renderer`
 retains HTTP status, API error code and field errors in `FormRequestError`.
 The renderer maps field errors back to their inputs and preserves entered values.
 Hosts own authentication, authorization recovery, credentials and CSRF headers.

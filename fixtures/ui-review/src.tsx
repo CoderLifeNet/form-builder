@@ -1,9 +1,9 @@
 import React, { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { CssBaseline, Button, Stack, Container, Typography } from "@coderlifenet/ui-core";
-import { FormBuilder, FormManager } from "@coderlifenet/form-builder";
-import { FormRenderer, RecordHistoryView } from "@coderlifenet/form-react";
-import { validateDefinition } from "@coderlifenet/form-core";
+import { FormBuilder, FormManager } from "@coderlifenet/form-builder/builder";
+import { FormRenderer, RecordHistoryView } from "@coderlifenet/form-builder/renderer";
+import { validateDefinition } from "@coderlifenet/form-builder/core";
 const initial = validateDefinition({ metadata:{formId:"review",name:"Review form"}, sections:[{id:"details",title:"Details",order:0}], fields:[{id:"name",key:"name",label:"Name",type:"text",sectionId:"details",row:0,width:6,required:true}] });
 function Review() {
  const [view,setView]=useState("manager");

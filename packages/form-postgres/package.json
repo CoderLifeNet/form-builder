@@ -1,7 +1,7 @@
 {
   "name": "@coderlifenet/form-postgres",
   "version": "0.1.0-alpha.0",
-  "private": false,
+  "private": true,
   "repository": {
     "type": "git",
     "url": "https://github.com/CoderLifeNet/form-builder.git",

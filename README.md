@@ -2,13 +2,13 @@
 
 A reusable form engine for visually designing forms, publishing immutable definitions, collecting and editing records, and reviewing historical changes.
 
-Status: implementation baseline in progress (internal candidate `0.1.0`, unpublished).
+Status: implementation baseline in progress with first public package preparation for `@coderlifenet/form-builder@0.1.0-alpha.0` (not yet published).
 
-This repository now contains a runnable monorepo with core contracts, a PostgreSQL-backed service baseline, React packages, two example hosts, and local infrastructure scripts.
+This repository now contains a runnable monorepo with one public artifact (`@coderlifenet/form-builder`) and internal support modules for core contracts, renderer, server, and PostgreSQL integration.
 
 Scope is still in active delivery. Not every requirement from `docs/prompts/first-working-version.md` is complete yet. See sprint evidence for exact pass/partial/fail items.
 
-The React packages now target the exact published `0.2.0-alpha.0` UI pair. See [UI integration](docs/ui-integration.md) for tracking, accessibility and verification.
+The public package targets the exact published `0.2.0-alpha.0` UI pair through host-owned runtime integration. See [UI integration](docs/ui-integration.md) for tracking, accessibility and verification.
 
 ## Quick start
 
@@ -70,18 +70,20 @@ npm run dev:infra:down
 
 ## Workspace layout
 
-- `packages/form-core`: schemas, stable IDs, normalization, rule helpers.
-- `packages/form-postgres`: migrations and repository implementation.
-- `packages/form-server`: Express HTTP adapter and policy/source extension points.
-- `packages/form-react`: renderer/history components baseline.
-- `packages/form-builder`: manager/builder components baseline.
+- `packages/form-builder`: public package with subpath exports:
+	- `@coderlifenet/form-builder/builder`
+	- `@coderlifenet/form-builder/renderer`
+	- `@coderlifenet/form-builder/core`
+	- `@coderlifenet/form-builder/server`
+	- `@coderlifenet/form-builder/postgres`
+- `packages/form-core`, `packages/form-react`, `packages/form-server`, `packages/form-postgres`: internal support modules used to assemble the public artifact.
 - `apps/example-minimal`: minimal host integration example.
 - `apps/example-workspace`: workspace/project-oriented host example.
 - `fixtures/consumer-smoke`: packed-artifact fixture checks.
 
 ## Intended developer experience
 
-Install the supported packages, configure a database, run provided migrations, connect trusted identity and permission checks, mount the backend and React interfaces, and use the complete form lifecycle. Consumers retain ownership of their data and deployments.
+Install the single public package, configure a database, run provided migrations, connect trusted identity and permission checks, mount the backend and React interfaces, and use the complete form lifecycle. Consumers retain ownership of their data and deployments.
 
 The baseline currently provides:
 
@@ -106,7 +108,7 @@ Authentication remains host-controlled; server authorization is mandatory.
 - Provided database migrations and upgrade guidance.
 - WCAG 2.2 AA target and public documentation on CoderLifeNet.
 
-TrackForge Atlas is a motivating consumer, not the owner of this project's domain model. A ready-made form repository is outside current scope.
+TrackForge Atlas is a motivating consumer, not the owner of this project's domain model. Keep TrackForge-specific guidance in [docs/trackforge-integration.md](docs/trackforge-integration.md); keep generic host integration in shared docs.
 
 ## Documentation
 

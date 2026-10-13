@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, type ReactElement } from "react";
-import { FormBuilder } from "@coderlifenet/form-builder";
-import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer } from "@coderlifenet/form-react";
-import type { FormDefinition } from "@coderlifenet/form-core";
+import { FormBuilder } from "@coderlifenet/form-builder/builder";
+import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer } from "@coderlifenet/form-builder/renderer";
+import type { FormDefinition } from "@coderlifenet/form-builder/core";
 import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
 const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://localhost:4010";

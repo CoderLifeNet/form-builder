@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useRef, type ReactElement } from "react";
-import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder";
-import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView } from "@coderlifenet/form-react";
-import type { FormDefinition } from "@coderlifenet/form-core";
+import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder/builder";
+import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView } from "@coderlifenet/form-builder/renderer";
+import type { FormDefinition } from "@coderlifenet/form-builder/core";
 import { Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
 type View = "manager" | "builder" | "capture" | "history" | "settings" | "submissions" | "readOnly";

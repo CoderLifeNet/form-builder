@@ -10,7 +10,6 @@
   },
   "dependencies": {
     "@coderlifenet/form-builder": "0.1.0-alpha.0",
-    "@coderlifenet/form-react": "0.1.0-alpha.0",
     "@coderlifenet/ui-core": "0.2.0-alpha.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
