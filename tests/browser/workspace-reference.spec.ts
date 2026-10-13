@@ -153,12 +153,12 @@ test("workspace reference host supports persisted submissions, read-only renderi
 
   await page.reload();
   await expect(page.getByText("Connected as owner1")).toBeVisible();
-  await page.getByRole("button", { name: "Manager", exact: true }).click();
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Forms" })).toBeVisible();
   await page.getByRole("button", { name: seeded.formName }).click();
-  await page.getByRole("button", { name: "Manager", exact: true }).click();
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
 
-  await page.getByRole("button", { name: "Submissions", exact: true }).click();
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
   await expect(page.getByText(seeded.ownerRecordId)).toBeVisible();
   await expect(page.getByText(seeded.collabRecordId)).toBeVisible();
@@ -168,52 +168,52 @@ test("workspace reference host supports persisted submissions, read-only renderi
 
   const ownerRow = page.getByTestId(`submission-${seeded.ownerRecordId}`);
 
-  await ownerRow.getByRole("button", { name: "Read only", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Read-only rendering" })).toBeVisible();
+  await ownerRow.getByRole("button", { name: "View response", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response view (read-only)" })).toBeVisible();
   await expect(page.getByLabel("Title")).toHaveValue("Owner seeded record");
 
-  await page.getByRole("button", { name: "Submissions", exact: true }).click();
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
 
-  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "History", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Revision history" })).toBeVisible();
-  await page.getByRole("button", { name: "Edit latest record", exact: true }).click();
+  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "Response history", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response revision history" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit this response", exact: true }).click();
   await page.getByLabel("Title").fill("Owner edited title via history");
   await page.getByRole("button", { name: "Submit", exact: true }).click();
 
-  await page.getByRole("button", { name: "Submissions", exact: true }).click();
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
 
-  await page.getByTestId(`submission-${seeded.collabRecordId}`).getByRole("button", { name: "Read only", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Read-only rendering" })).toBeVisible();
+  await page.getByTestId(`submission-${seeded.collabRecordId}`).getByRole("button", { name: "View response", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response view (read-only)" })).toBeVisible();
   await expect(page.getByLabel("Title")).toHaveValue("Collaborator seeded record");
 
-  await page.getByRole("button", { name: "Submissions", exact: true }).click();
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
-  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "History", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Revision history" })).toBeVisible();
+  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "Response history", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response revision history" })).toBeVisible();
   await expect(page.getByText("Owner edited title via history")).toBeVisible();
 
-  await page.getByRole("button", { name: "Submissions", exact: true }).click();
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
   await page.reload();
   await expect(page.getByText("Connected as owner1")).toBeVisible();
   await page.getByRole("button", { name: seeded.formName, exact: true }).click();
-  await page.getByRole("button", { name: "Submissions", exact: true }).click();
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
   await page.getByRole("button", { name: "Apply filters", exact: true }).click();
   await expect(page.getByText(seeded.ownerRecordId)).toBeVisible();
   await expect(page.getByText(seeded.collabRecordId)).toBeVisible();
 
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Published versions" })).toBeVisible();
-  await page.getByRole("combobox", { name: "Version" }).click();
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Published form versions" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Version", exact: true }).click();
   await page.getByRole("option", { name: new RegExp(`^v${seeded.version1}\\b`) }).click();
-  await page.getByRole("button", { name: "Open selected version read only", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Read-only rendering" })).toBeVisible();
+  await page.getByRole("button", { name: "Open selected form version", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response view (read-only)" })).toBeVisible();
   await expect(page.getByLabel("Added in v2")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("combobox", { name: "Version" }).click();
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await page.getByRole("combobox", { name: "Version", exact: true }).click();
   await page.getByRole("option", { name: new RegExp(`^v${seeded.version2}\\b`) }).click();
-  await page.getByRole("button", { name: "Open selected version read only", exact: true }).click();
+  await page.getByRole("button", { name: "Open selected form version", exact: true }).click();
   await expect(page.getByLabel("Added in v2")).toBeVisible();
 });

@@ -2,6 +2,7 @@ import { TrackingEditor, AccessibilityEditor } from "./settings.js";
 import { DragEvent, ReactElement, useEffect, useMemo, useState, useRef } from "react";
 import { copyDefinition, parsePortableJson, createStableId, FormDefinition, validateDefinition } from "@coderlifenet/form-core";
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -76,25 +77,25 @@ export function FormManager(props: {
   }, [props.forms, query, status]);
 
   return (
-    <Box component="section" aria-label="Form manager">
-      <Stack direction="row" spacing={2} sx={{ justifyContent: "space-between", alignItems: "center" }}>
+    <Box component="section" aria-label="Forms">
+      <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { xs: "flex-start", md: "center" } }}>
         <Box>
           <Typography variant="h5" component="h2">Forms</Typography>
-          <Typography variant="body2" color="text.secondary">Design once, publish immutable versions.</Typography>
+          <Typography variant="body2" color="text.secondary">Create and manage reusable form designs. Published versions stay immutable for response history.</Typography>
         </Box>
-        <Stack direction="row" spacing={1}>
-          <Button aria-label="Import" title="Import" type="button" variant="outlined" onClick={props.onImportAsNew}>
-            Import
+        <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+          <Button aria-label="Import form" title="Import form" type="button" variant="outlined" onClick={props.onImportAsNew}>
+            Import form JSON
           </Button>
-          <Button type="button" variant="contained" onClick={props.onCreateForm}>Create form</Button>
+          <Button type="button" variant="contained" onClick={props.onCreateForm}>Create new form</Button>
         </Stack>
       </Stack>
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 2 }}>
         <TextField
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search forms"
-          label="Search"
+          placeholder="Find by form name"
+          label="Find form"
           size="small"
         />
         <FormControl size="small" sx={{ minWidth: 180 }}>
@@ -111,28 +112,39 @@ export function FormManager(props: {
           </Select>
         </FormControl>
       </Stack>
+      {rows.length === 0 ? (
+        <Alert severity="info" sx={{ mt: 2 }}>
+          {query || status !== "all"
+            ? "No forms match this filter. Clear filters or create a new form."
+            : "No forms yet. Create a form to start designing and publishing versions."}
+        </Alert>
+      ) : null}
       <Box component="ul" sx={{ mt: 2, listStyle: "none", p: 0, m: 0 }}>
         {rows.map((form) => (
           <Paper
             key={form.id}
             component="li"
             variant="outlined"
-            sx={{ p: 1.25, mb: 1, display: "grid", gridTemplateColumns: "1fr auto auto", gap: 1, alignItems: "center" }}
+            sx={{ p: 1.25, mb: 1, display: "grid", gridTemplateColumns: { xs: "minmax(0,1fr)", md: "minmax(0,1fr) auto auto" }, gap: 1, alignItems: "center" }}
           >
-            <Button type="button" variant="text" sx={{ justifyContent: "flex-start" }} onClick={() => props.onOpenBuilder(form.id)}>
-              {form.name}
-            </Button>
+            <Box>
+              <Button type="button" variant="text" sx={{ justifyContent: "flex-start", px: 0.5 }} onClick={() => props.onOpenBuilder(form.id)}>
+                {form.name}
+              </Button>
+              {form.description ? <Typography variant="body2" color="text.secondary">{form.description}</Typography> : null}
+            </Box>
             <Chip
               size="small"
+              sx={{ justifySelf: { xs: "flex-start", md: "auto" } }}
               label={
                 form.archived
                   ? "Archived"
                   : form.publishedVersion
-                    ? `Published v${form.publishedVersion}${form.hasDraft ? " + draft" : ""}`
-                    : "Draft"
+                    ? `Published v${form.publishedVersion}${form.hasDraft ? " with draft changes" : ""}`
+                    : "Draft only"
               }
             />
-            <Stack direction="row" spacing={0.5} sx={{ justifyContent: "flex-end" }}>
+            <Stack direction="row" spacing={0.5} sx={{ justifyContent: { xs: "flex-start", md: "flex-end" } }}>
               <Tooltip title="Duplicate">
                 <IconButton aria-label="Duplicate" type="button" size="small" onClick={() => props.onDuplicate(form.id)}>
                   ⧉
@@ -184,6 +196,22 @@ export function FormBuilder(props: {
   const queue = useRef<Promise<void>>(Promise.resolve());
   const formId = useRef(definition.metadata.formId);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
+  const [dropTargetFieldId, setDropTargetFieldId] = useState<string | null>(null);
+
+  const unresolvedDependencies = useMemo(() => {
+    return Object.entries(definition.dependencyVersions)
+      .map(([sourceId, expectedVersion]) => {
+        const availableVersion = props.sourceCapabilities?.[sourceId];
+        const affectedFields = definition.fields.filter((field) => field.source?.id === sourceId);
+        return {
+          sourceId,
+          expectedVersion,
+          availableVersion,
+          affectedFields
+        };
+      })
+      .filter((entry) => entry.availableVersion !== entry.expectedVersion);
+  }, [definition.dependencyVersions, definition.fields, props.sourceCapabilities]);
 
   useEffect(() => {
     formId.current = props.initialDefinition.metadata.formId;
@@ -374,6 +402,7 @@ export function FormBuilder(props: {
 
   const handleCanvasDrop = (event: DragEvent<HTMLButtonElement>, targetFieldId: string): void => {
     event.preventDefault();
+    setDropTargetFieldId(null);
     if (!draggingFieldId || draggingFieldId === targetFieldId) {
       return;
     }
@@ -430,11 +459,14 @@ export function FormBuilder(props: {
 
   return (
     <Box component="section" aria-label="Form builder">
-      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ justifyContent: "space-between", alignItems: "center" }}>
-        <Typography variant="h5" component="h2">Builder</Typography>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ justifyContent: "space-between", alignItems: { xs: "flex-start", sm: "center" } }}>
+        <Box>
+          <Typography variant="h5" component="h2">Form designer</Typography>
+          <Typography variant="body2" color="text.secondary">Build the form structure, save draft changes, then publish a new immutable form version.</Typography>
+        </Box>
         <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
           <Typography role="status" aria-live="polite" variant="body2" color={saveState === "error" ? "error" : "text.secondary"}>
-            Status: {saveState}{saveMessage ? ` - ${saveMessage}` : ""}
+            {saveStateLabel(saveState)}{saveMessage ? ` - ${saveMessage}` : ""}
           </Typography>
           {saveState === "error" && props.onReloadDraft && <Button onClick={async () => {
             if (!window.confirm("Load the current saved draft and discard your local edits?")) return;
@@ -451,26 +483,75 @@ export function FormBuilder(props: {
             Save draft
           </Button>
           <Button type="button" variant="contained" disabled={saveState === "saving" || saveState === "publishing"} onClick={() => void publishDraft()}>
-            Publish
+            Publish version
           </Button>
         </Stack>
       </Stack>
       <Box component="details" sx={{ mt: 2 }}>
-        <Box component="summary">Form tracking and accessibility</Box>
+        <Box component="summary">Advanced form settings</Box>
         <Stack spacing={2} sx={{ p: 2 }}>
-          <TrackingEditor form value={definition.tracking} onChange={tracking => updateDefinition(prev => ({ ...prev, tracking }))} />
-          <Typography variant="subtitle2">Capability dependencies</Typography>
-          {Object.entries(definition.dependencyVersions).map(([id, version]) => <Stack key={id} direction="row" spacing={1}><Typography>{id} ({version}){props.sourceCapabilities?.[id] === version ? "" : " — unavailable or incompatible"}</Typography><Button disabled={definition.fields.some(field => field.source?.id === id)} onClick={() => updateDefinition(previous => { const dependencyVersions = { ...previous.dependencyVersions }; delete dependencyVersions[id]; return { ...previous, dependencyVersions }; })}>Remove declaration</Button></Stack>)}
-          <Typography variant="caption">Reconnect or remove field sources in Data settings. Publication remains blocked while dependencies are unresolved.</Typography>
-          <AccessibilityEditor value={definition.accessibility} onChange={accessibility => updateDefinition(prev => ({ ...prev, accessibility }))} />
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Analytics identifiers and event delivery</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.25 }}>
+              Optional tracking metadata for host analytics routing. This never changes form values or permissions.
+            </Typography>
+            <TrackingEditor form value={definition.tracking} onChange={tracking => updateDefinition(prev => ({ ...prev, tracking }))} />
+          </Box>
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Accessibility overrides</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.25 }}>
+              Most accessibility behavior is automatic. Use overrides only when the default wording is unclear for assistive technology.
+            </Typography>
+            <AccessibilityEditor value={definition.accessibility} onChange={accessibility => updateDefinition(prev => ({ ...prev, accessibility }))} />
+          </Box>
+          <Box>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Connected source dependencies</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.25 }}>
+              These dependencies are host integrations. Authors can choose how fields use them, but hosts provide the actual source endpoints.
+            </Typography>
+            {unresolvedDependencies.length ? (
+              <Stack spacing={1}>
+                {unresolvedDependencies.map((entry) => (
+                  <Paper key={entry.sourceId} variant="outlined" sx={{ p: 1 }}>
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {entry.sourceId}: expected {entry.expectedVersion}, available {entry.availableVersion ?? "not available"}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
+                      Affected fields: {entry.affectedFields.length ? entry.affectedFields.map((field) => field.label).join(", ") : "none"}
+                    </Typography>
+                    {entry.affectedFields[0] ? (
+                      <Button
+                        type="button"
+                        size="small"
+                        onClick={() => {
+                          setSelectedFieldId(entry.affectedFields[0].id);
+                          setActiveTab("data");
+                        }}
+                      >
+                        Review affected field
+                      </Button>
+                    ) : null}
+                  </Paper>
+                ))}
+                <Typography variant="caption" color="text.secondary">
+                  Publish is blocked until source versions match or fields are updated to available sources.
+                </Typography>
+              </Stack>
+            ) : (
+              <Typography variant="body2" color="text.secondary">All declared dependencies currently match available host source versions.</Typography>
+            )}
+          </Box>
         </Stack>
       </Box>
-      <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "minmax(0,1fr)", md: "180px minmax(0,1fr) 320px" }, gap: 1.5 }}>
+      <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "minmax(0,1fr)", md: "220px minmax(0, 2fr) minmax(280px, 1fr)" }, gap: 1.5 }}>
         <Paper component="aside" variant="outlined" sx={{ p: 1.5 }}>
           <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center" }}>
-            <Typography variant="h6">Palette</Typography>
-            <Button type="button" size="small" variant="text" onClick={addSection}>Add section</Button>
+            <Typography variant="h6">Add fields</Typography>
+            <Button type="button" size="small" variant="text" onClick={addSection}>New section</Button>
           </Stack>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5, mb: 1 }}>
+            Choose a field type, then configure it in Field settings.
+          </Typography>
           <Stack spacing={1} sx={{ mt: 1 }}>
             {paletteFields.map((field) => (
               <Button key={field.type} type="button" variant="outlined" onClick={() => addField(field.type)}>
@@ -481,10 +562,15 @@ export function FormBuilder(props: {
         </Paper>
 
         <Paper component="main" variant="outlined" sx={{ p: 1.5 }}>
-          <Typography variant="h6">Layout</Typography>
+          <Typography variant="h6">Form preview layout</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Drag fields to reorder. Keyboard: Alt+ArrowUp/Down moves; Alt+ArrowLeft/Right changes width.
+            Drag fields to reorder. Keyboard support: Alt+ArrowUp/Down changes order; Alt+ArrowLeft/Right changes width.
           </Typography>
+          {definition.fields.length === 0 ? (
+            <Alert severity="info" sx={{ mb: 1 }}>
+              Start by adding a field from the Add fields panel.
+            </Alert>
+          ) : null}
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 1 }}>
             {definition.fields.map((field) => (
               <Button
@@ -498,11 +584,48 @@ export function FormBuilder(props: {
                   justifyContent: "flex-start",
                   p: 1,
                   minHeight: 76,
-                  overflow: "hidden"
+                  overflow: "hidden",
+                  borderTop: dropTargetFieldId === field.id && draggingFieldId !== field.id ? "3px solid" : undefined,
+                  borderTopColor: "secondary.main"
                 }}
-                onDragStart={() => setDraggingFieldId(field.id)}
-                onDragEnd={() => setDraggingFieldId(null)}
-                onDragOver={(event) => event.preventDefault()}
+                onDragStart={(event) => {
+                  setDraggingFieldId(field.id);
+                  setDropTargetFieldId(null);
+                  const ghost = document.createElement("div");
+                  ghost.textContent = field.label;
+                  ghost.style.position = "fixed";
+                  ghost.style.top = "-9999px";
+                  ghost.style.left = "-9999px";
+                  ghost.style.padding = "8px 12px";
+                  ghost.style.borderRadius = "8px";
+                  ghost.style.background = "#0b57d0";
+                  ghost.style.color = "#fff";
+                  ghost.style.font = "600 13px sans-serif";
+                  ghost.style.pointerEvents = "none";
+                  document.body.appendChild(ghost);
+                  event.dataTransfer.setDragImage(ghost, 12, 12);
+                  event.dataTransfer.effectAllowed = "move";
+                  queueMicrotask(() => {
+                    if (ghost.parentNode) {
+                      ghost.parentNode.removeChild(ghost);
+                    }
+                  });
+                }}
+                onDragEnd={() => {
+                  setDraggingFieldId(null);
+                  setDropTargetFieldId(null);
+                }}
+                onDragOver={(event) => {
+                  event.preventDefault();
+                  if (draggingFieldId && draggingFieldId !== field.id) {
+                    setDropTargetFieldId(field.id);
+                  }
+                }}
+                onDragLeave={() => {
+                  if (dropTargetFieldId === field.id) {
+                    setDropTargetFieldId(null);
+                  }
+                }}
                 onDrop={(event) => handleCanvasDrop(event, field.id)}
                 onClick={() => setSelectedFieldId(field.id)}
                 onKeyDown={(event) => {
@@ -553,7 +676,7 @@ export function FormBuilder(props: {
 
         <Paper component="aside" variant="outlined" sx={{ p: 1.5 }}>
           <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-            <Typography variant="h6">Properties</Typography>
+            <Typography variant="h6">Field settings</Typography>
             {selectedField ? (
               <Tooltip title="Remove field">
                 <IconButton aria-label="Remove field" size="small" color="error" onClick={() => removeField(selectedField.id)}>
@@ -564,7 +687,7 @@ export function FormBuilder(props: {
           </Stack>
 
           {!selectedField ? (
-            <Typography variant="body2" color="text.secondary">Select a field to edit configuration.</Typography>
+            <Typography variant="body2" color="text.secondary">Select a field in the preview to edit its settings.</Typography>
           ) : (
             <>
               <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 1, flexWrap: "wrap" }}>
@@ -576,10 +699,14 @@ export function FormBuilder(props: {
                     variant={activeTab === tab ? "contained" : "outlined"}
                     onClick={() => setActiveTab(tab)}
                   >
-                    {tab[0].toUpperCase() + tab.slice(1)}
+                    {tabLabel(tab)}
                   </Button>
                 ))}
               </Stack>
+
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                {tabHelpText(activeTab)}
+              </Typography>
 
               {activeTab === "settings" ? <Stack spacing={2}>
                 <TrackingEditor key={selectedField.id} value={selectedField.tracking} onChange={tracking => updateSelectedField(field => ({ ...field, tracking }))} />
@@ -619,7 +746,7 @@ export function FormBuilder(props: {
                 <Stack spacing={1.25}>
                   {selectedField.source && <>
                     <TextField select label="Source purpose" value={selectedField.source.kind ?? "value"} slotProps={{ select: { native: true } }} onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, kind: e.target.value as "value" | "options" } }))}><option value="value">Value</option><option value="options">Options</option></TextField>
-                    <TextField label="Source dependency field IDs (comma separated)" value={selectedField.source.dependsOn?.join(",") ?? ""} onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, dependsOn: e.target.value.split(",").map(id => id.trim()).filter(Boolean) } }))} />
+                    <TextField label="Refresh when these field IDs change" value={selectedField.source.dependsOn?.join(",") ?? ""} helperText="Example: field_region, field_location" onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, dependsOn: e.target.value.split(",").map(id => id.trim()).filter(Boolean) } }))} />
                   </>}
                   <TextField
                     label="Default value"
@@ -627,10 +754,10 @@ export function FormBuilder(props: {
                     onChange={(event) => updateSelectedField((field) => ({ ...field, defaultValue: event.target.value || undefined }))}
                   />
                   <FormControl size="small">
-                    <InputLabel id="field-source-label">Source</InputLabel>
+                    <InputLabel id="field-source-label">Fill from host source</InputLabel>
                     <Select
                       labelId="field-source-label"
-                      label="Source"
+                      label="Fill from host source"
                       value={selectedField.source?.id ?? ""}
                       onChange={(event) => {
                         const nextId = String(event.target.value);
@@ -654,10 +781,10 @@ export function FormBuilder(props: {
 
                   {selectedField.source ? (
                     <FormControl size="small">
-                      <InputLabel id="field-source-mode-label">Population</InputLabel>
+                      <InputLabel id="field-source-mode-label">When source values apply</InputLabel>
                       <Select
                         labelId="field-source-mode-label"
-                        label="Population"
+                        label="When source values apply"
                         value={selectedField.source.mode}
                         onChange={(event) => {
                           const mode = event.target.value as NonNullable<Field["source"]>["mode"];
@@ -667,10 +794,10 @@ export function FormBuilder(props: {
                           }));
                         }}
                       >
-                        <MenuItem value="manual">Manual</MenuItem>
-                        <MenuItem value="create_only">Create only</MenuItem>
-                        <MenuItem value="refresh_on_edit">Refresh on edit</MenuItem>
-                        <MenuItem value="display_only">Display only</MenuItem>
+                        <MenuItem value="manual">Manual entry only</MenuItem>
+                        <MenuItem value="create_only">Set once when response is first created</MenuItem>
+                        <MenuItem value="refresh_on_edit">Refresh each time the response is edited</MenuItem>
+                        <MenuItem value="display_only">Always show host-provided value</MenuItem>
                       </Select>
                     </FormControl>
                   ) : null}
@@ -934,6 +1061,57 @@ function defaultLabelByType(type: Field["type"]): string {
       return "Files";
     default:
       return "Field";
+  }
+}
+
+function tabLabel(tab: BuilderTab): string {
+  switch (tab) {
+    case "basic":
+      return "Field details";
+    case "data":
+      return "Data source";
+    case "rules":
+      return "Validation & conditions";
+    case "layout":
+      return "Placement";
+    case "settings":
+      return "Advanced";
+    default:
+      return tab;
+  }
+}
+
+function tabHelpText(tab: BuilderTab): string {
+  switch (tab) {
+    case "basic":
+      return "Label, helper copy, placeholders, requiredness, and upload constraints.";
+    case "data":
+      return "Connect host-provided sources or keep manual entry only.";
+    case "rules":
+      return "Set validation and conditional behavior for this field.";
+    case "layout":
+      return "Control section placement, width, and ordering.";
+    case "settings":
+      return "Optional analytics metadata and accessibility overrides.";
+    default:
+      return "";
+  }
+}
+
+function saveStateLabel(state: SaveState): string {
+  switch (state) {
+    case "saved":
+      return "All changes saved";
+    case "saving":
+      return "Saving draft";
+    case "publishing":
+      return "Publishing version";
+    case "unsaved":
+      return "Unsaved edits";
+    case "error":
+      return "Save failed";
+    default:
+      return state;
   }
 }
 

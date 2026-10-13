@@ -33,7 +33,7 @@ describe("example minimal host analytics ownership", () => {
       </AnalyticsHost>
     );
 
-    await userEvent.click(screen.getByRole("button", { name: "Renderer" }));
+    await userEvent.click(screen.getByRole("button", { name: "Fill out form" }));
     const title = await screen.findByRole("textbox", { name: /Request title/i });
 
     const selected = () => events.filter(item => item.event.type === "ui.text_field.change" && item.event.semanticId === "request-title-control");

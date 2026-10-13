@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
 import { it, expect, vi, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { validateDefinition } from "@coderlifenet/form-core";
 import { FormBuilder } from "./index.js";
@@ -26,4 +26,13 @@ it("failed manual save preserves edits and does not navigate",async()=>{
  await userEvent.click(screen.getByRole("button",{name:"Save draft"}));
  await waitFor(()=>expect(screen.getByRole("status").textContent).toContain("Permission changed"));
  expect(done).not.toHaveBeenCalled();expect(screen.getByRole("textbox",{name:"Label"}).getAttribute("value")).toBe("A edited");
+});
+it("uses a single-field custom drag image for layout reordering",()=>{
+ const save=vi.fn();
+ render(<FormBuilder initialDefinition={definition} onSaveDraft={save} onPublish={vi.fn()} autosaveDelay={false}/>);
+ const layoutField=document.querySelector('section[aria-label="Form builder"] main button[draggable="true"]') as HTMLButtonElement | null;
+ expect(layoutField).not.toBeNull();
+ const setDragImage=vi.fn();
+ fireEvent.dragStart(layoutField!,{dataTransfer:{setDragImage,effectAllowed:"none"}} as any);
+ expect(setDragImage).toHaveBeenCalledTimes(1);
 });

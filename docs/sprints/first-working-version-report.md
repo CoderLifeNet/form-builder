@@ -4,6 +4,38 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: human-centered UX pass (2026-10-13)
+
+Branch: `feat/ui-0.2-integration`.
+
+This pass focused on language clarity, workflow context, responsive layout/readability, and drag/drop usability across reusable UI and both reference examples without changing lifecycle/security/history contracts.
+
+Corrected usability issues:
+
+- Replaced implementation-heavy labels with outcome language in reusable builder and examples (`Forms`, `Design form`, `Fill out form`, `Responses`, `Field settings`, `Add fields`).
+- Removed ambiguous global response-history/read-only entry points; response viewing/editing/history are now contextual actions per selected response.
+- Clarified form-version history vs response-revision history with explicit headings and helper copy.
+- Reorganized advanced settings: analytics and accessibility are separated with concise helper text and examples.
+- Improved dependency/source issue handling: unresolved source dependencies appear only when relevant, identify impacted fields, and provide direct jump-to-field remediation.
+- Added differentiated response empty states (`no responses yet` vs `no filter matches`).
+- Grouped shell-only controls (identity/theme/analytics) into explicit `Demo tools` panels in examples.
+- Improved responsive wrapping and date filter label behavior (`inputLabel.shrink`) to avoid overlap.
+- Fixed drag artifact by using a single-field custom drag image with stable pointer offset and visible drop target indicator.
+
+Validation evidence for this UX pass:
+
+| Command | Result |
+| --- | --- |
+| `npm run typecheck` | PASS across workspace packages and both examples. |
+| `npm run build` | PASS across workspace packages and both examples. |
+| `npm test` | PASS with exact counts: `@coderlifenet/form-builder` 3 passed, `@coderlifenet/form-core` 8 passed, `@coderlifenet/form-react` 23 passed, `@coderlifenet/form-server` 19 passed/7 skipped, `@coderlifenet/form-postgres` 6 skipped, `example-minimal` 1 passed. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:browser:workspace` | PASS: Playwright workspace flow 1 passed. |
+| `npm run test:browser` | PASS: 14 Playwright browser checks (desktop + narrow keyboard/WCAG/responsive scenarios). |
+
+Manual visual review performed in the integrated browser for both reference examples (`example-minimal` and `example-workspace`) using live dev servers to confirm heading hierarchy, helper copy, contextual response actions, and demo-tools grouping.
+
+UX and accessibility final acceptance remains pending Chris's hands-on review.
+
 ## Continuation: bounded correctness pass on feat/ui-0.2-integration (2026-10-13)
 
 Branch: `feat/ui-0.2-integration`.

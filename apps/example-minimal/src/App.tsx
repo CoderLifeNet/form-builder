@@ -121,18 +121,27 @@ export function App(): ReactElement {
 
   const content = (
     <Box component="main" sx={{ maxWidth: 1100, margin: "0 auto", p: 2.5 }}>
-      <Typography variant="h4" component="h1">Minimal integration example</Typography>
-      <Typography variant="body1" sx={{ mt: 1 }}>Uses shared packages with real backend draft/publish/submit behavior.</Typography>
+      <Typography variant="h4" component="h1">Minimal form host example</Typography>
+      <Typography variant="body1" sx={{ mt: 1 }}>Design a form, publish a version, then fill it out with the same reusable package.</Typography>
       <Typography aria-live="polite" variant="body2" color="text.secondary" sx={{ mt: 1 }}>{status}</Typography>
-      <Stack direction="row" spacing={1} sx={{ mt: 1.5, mb: 2 }}>
-        <Button type="button" variant={mode === "builder" ? "contained" : "outlined"} onClick={() => setMode("builder")}>Builder</Button>
-        <Button type="button" variant={mode === "renderer" ? "contained" : "outlined"} onClick={() => setMode("renderer")}>Renderer</Button>
-        <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
-          {useCustomTheme ? "Custom theme on" : "Stock MUI theme"}
-        </Button>
-      </Stack>
+      <Paper variant="outlined" sx={{ p: 1.25, mt: 1.5, mb: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}>
+          <Box>
+            <Typography variant="subtitle2">Demo tools: host controls</Typography>
+            <Typography variant="caption" color="text.secondary">Theme and navigation controls used only by this demo shell.</Typography>
+          </Box>
+          <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+            <Button type="button" variant={mode === "builder" ? "contained" : "outlined"} onClick={() => setMode("builder")}>Design form</Button>
+            <Button type="button" variant={mode === "renderer" ? "contained" : "outlined"} onClick={() => setMode("renderer")}>Fill out form</Button>
+            <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
+              {useCustomTheme ? "Use custom theme" : "Use default theme"}
+            </Button>
+          </Stack>
+        </Stack>
+      </Paper>
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Box hidden={mode !== "builder"}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Form design and publishing</Typography>
           <FormBuilder
             initialDefinition={definition}
             onReloadDraft={async () => { const draft = await api<{revision:number;definition:FormDefinition}>(`/api/forms/${formId}/draft`); revisionRef.current = draft.revision; setDraftRevision(draft.revision); setDefinition(draft.definition); return draft.definition; }}
@@ -174,6 +183,7 @@ export function App(): ReactElement {
           />
         </Box>
         <Box hidden={mode !== "renderer"}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Form response capture</Typography>
           <FormRenderer
             key={definitionId}
             definition={publishedDefinition ?? definition}

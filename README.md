@@ -122,6 +122,8 @@ Start with the [documentation index](docs/README.md).
 - [Release publishing playbook](docs/release-publishing.md)
 - [Integration and public documentation plan](docs/integration.md)
 - [File storage adapters and setup](docs/file-storage.md)
+- [Minimal example walkthrough](apps/example-minimal/README.md)
+- [Workspace/project example walkthrough](apps/example-workspace/README.md)
 - [Sprint plan](docs/sprints/first-working-version.md)
 - [Sprint evidence report](docs/sprints/first-working-version-report.md)
 

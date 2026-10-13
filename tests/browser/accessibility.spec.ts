@@ -6,7 +6,7 @@ const assertViewActive = async (page: import("@playwright/test").Page, view: str
   return;
  }
  if (view === "builder") {
-  await expect(page.getByRole("heading",{name:"Builder",exact:true})).toBeVisible();
+    await expect(page.getByRole("heading",{name:"Form designer",exact:true})).toBeVisible();
   return;
  }
  if (view === "capture") {
@@ -39,7 +39,7 @@ test("history view remains keyboard operable at narrow widths",async({page})=>{
  await expect(page.getByRole("heading",{name:"Revision history",exact:true})).toBeVisible();
  await page.keyboard.press("Tab");
  await page.keyboard.press("Enter");
- await expect(page.getByText("Example")).toBeVisible();
+ await expect(page.getByText("Name: Example",{exact:true})).toBeVisible();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
@@ -48,7 +48,7 @@ test("builder keyboard operations activate controls, restore focus from popup, a
  const builderButton=page.getByRole("button",{name:"builder",exact:true});
  await builderButton.focus();
  await page.keyboard.press("Enter");
- await expect(page.getByRole("heading",{name:"Builder",exact:true})).toBeVisible();
+ await expect(page.getByRole("heading",{name:"Form designer",exact:true})).toBeVisible();
 
  const addTextButton=page.locator('section[aria-label="Form builder"] aside').first().getByRole("button",{name:"Text",exact:true});
  await addTextButton.focus();
@@ -64,10 +64,10 @@ test("builder keyboard operations activate controls, restore focus from popup, a
  await page.keyboard.press("Alt+ArrowUp");
  await expect(layoutButtons.first()).toContainText("Text field");
 
- const dataTab=page.getByRole("button",{name:"Data",exact:true});
+ const dataTab=page.getByRole("button",{name:"Data source",exact:true});
  await dataTab.focus();
  await page.keyboard.press("Enter");
- const sourceSelect=page.getByRole("combobox",{name:"Source",exact:true});
+ const sourceSelect=page.getByRole("combobox",{name:"Fill from host source",exact:true});
  await sourceSelect.focus();
  await expect(sourceSelect).toBeFocused();
  await page.keyboard.press("Space");

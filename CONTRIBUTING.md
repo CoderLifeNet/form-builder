@@ -1,13 +1,19 @@
 # Contributing
 
-This project is currently in discovery and design. Discuss implementation scope with the owner before starting runtime work.
+This project is in active implementation for the first working version. Keep changes within approved repository boundaries in AGENTS.md and docs.
 
-Read AGENTS.md and the documentation index. Submit coherent changes with a concise explanation of the problem, resulting behavior, and verification. Do not claim proposed features are available.
+Read AGENTS.md and the documentation index before editing. Submit coherent changes with a concise explanation of the problem, resulting behavior, and verification evidence.
 
-For future implementation, include relevant contract tests, security/authorization checks, accessibility verification, migrations, and documentation. Use the accepted work package's criteria; avoid tests that merely repeat implementation.
+For runtime changes, include relevant contract tests, security/authorization checks, accessibility verification, migrations, and documentation updates. Use the accepted work package criteria and avoid tests that only duplicate implementation details.
 
-No dependencies, package manager, backend HTTP framework, or ORM have been selected. Do not invent setup commands. Shared package compatibility must be inspected before dependency selection.
+For UX-affecting changes, review both reusable UI and both example hosts:
+
+- validate wording against real behavior,
+- avoid exposing implementation-only terminology,
+- keep response actions contextual,
+- preserve keyboard and accessibility behavior,
+- include focused regression coverage for changed interactions.
 
 Version changes follow docs/versioning.md. No automatic major releases or publishing.
 
-License selection remains pending. Do not accept outside code contributions or publish packages until licensing is resolved.
+License selection remains pending Chris's decision. Do not publish packages or accept outside code contributions until licensing is resolved.

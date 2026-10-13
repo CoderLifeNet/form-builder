@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, useRef, type ReactElement } from "react";
 import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder/builder";
 import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView } from "@coderlifenet/form-builder/renderer";
 import type { FormDefinition } from "@coderlifenet/form-builder/core";
-import { Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
+import { Alert, Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
 type View = "manager" | "builder" | "capture" | "history" | "settings" | "submissions" | "readOnly";
 
@@ -320,7 +320,7 @@ export function App(): ReactElement {
   async function openCapture(formId: string, options?: { recordId?: string; initialValues?: Record<string, unknown>; definitionId?: string }): Promise<void> {
     const form = await api<ApiForm>(`/api/forms/${formId}`);
     if (!form.publishedDefinitionId) {
-      setStatus("Publish the form before capture.");
+      setStatus("Publish a form version before people can fill it out.");
       return;
     }
 
@@ -438,56 +438,29 @@ export function App(): ReactElement {
 
   const content = (
     <Box component="main" sx={{ maxWidth: 1200, margin: "0 auto", p: 2.5 }}>
-      <Typography variant="h4" component="h1">Workspace/project host example</Typography>
+      <Typography variant="h4" component="h1">Workspace and project form host example</Typography>
       <Typography variant="body1" sx={{ mt: 1 }}>
-        Real API integration for manager, builder, publish, capture, history, archive, import and export.
+        End-to-end flow for designing forms, publishing versions, collecting responses, and reviewing immutable history.
       </Typography>
       <Typography aria-live="polite" variant="body2" color="text.secondary" sx={{ mt: 1 }}>{status}</Typography>
-      <Stack direction="row" spacing={1} sx={{ mt: 1.5, mb: 2 }}>
-        <Button type="button" variant={view === "manager" ? "contained" : "outlined"} onClick={() => setView("manager")}>Manager</Button>
-        <Button type="button" variant={view === "builder" ? "contained" : "outlined"} onClick={() => activeId && openBuilder(activeId)}>Builder</Button>
-        <Button type="button" variant={view === "capture" ? "contained" : "outlined"} onClick={() => activeId && openCapture(activeId)}>Capture</Button>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ mt: 1.5, mb: 2, flexWrap: "wrap" }}>
+        <Button type="button" variant={view === "manager" ? "contained" : "outlined"} onClick={() => setView("manager")}>Forms</Button>
+        <Button type="button" variant={view === "builder" ? "contained" : "outlined"} onClick={() => activeId && openBuilder(activeId)}>Design form</Button>
+        <Button type="button" variant={view === "capture" ? "contained" : "outlined"} onClick={() => activeId && openCapture(activeId)}>Fill out form</Button>
         <Button type="button" variant={view === "submissions" ? "contained" : "outlined"} onClick={async () => {
           setView("submissions");
           await loadSubmissions(true);
-        }}>Submissions</Button>
-        <Button
-          type="button"
-          variant={view === "history" ? "contained" : "outlined"}
-          onClick={async () => {
-            if (!submissions.length) {
-              await loadSubmissions(true);
-            }
-            const target = submissions[0];
-            if (!target) {
-              setStatus("Submit at least one record first.");
-              return;
-            }
-            await openRecordHistory(target.recordId);
-          }}
-        >
-          History
-        </Button>
-        <Button type="button" variant={view === "readOnly" ? "contained" : "outlined"} onClick={async () => {
-          if (!submissions.length) {
-            await loadSubmissions(true);
-          }
-          const target = submissions[0];
-          if (!target) {
-            setStatus("No submission is available yet.");
-            return;
-          }
-          await openReadOnlyRecord(target.recordId);
-        }}>Read only</Button>
-        <Button type="button" variant={view === "settings" ? "contained" : "outlined"} onClick={() => setView("settings")}>Settings</Button>
-        <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
-          {useCustomTheme ? "Custom theme on" : "Stock MUI theme"}
-        </Button>
+        }}>Responses</Button>
+        <Button type="button" variant={view === "settings" ? "contained" : "outlined"} onClick={() => setView("settings")}>Workspace settings</Button>
       </Stack>
 
       <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+        <Typography variant="subtitle2">Demo tools: identity and shell settings</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          Use these controls to simulate role-based access and host shell options. They do not change reusable package behavior.
+        </Typography>
         <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ alignItems: { md: "center" } }}>
-          <Typography variant="body2" color="text.secondary">Session</Typography>
+          <Typography variant="body2" color="text.secondary">Session identity</Typography>
           <FormControl size="small" sx={{ minWidth: 170 }}>
             <InputLabel id="session-user-label">User</InputLabel>
             <Select labelId="session-user-label" label="User" value={sessionUserId} onChange={async (event) => {
@@ -514,6 +487,9 @@ export function App(): ReactElement {
             </Select>
           </FormControl>
           <Typography variant="caption" color="text.secondary">tenant: {sessionTenantId}</Typography>
+          <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
+            {useCustomTheme ? "Use custom theme" : "Use default theme"}
+          </Button>
         </Stack>
       </Paper>
 
@@ -521,11 +497,11 @@ export function App(): ReactElement {
         {view === "manager" ? (
           <Stack spacing={1.5}>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
-              <Button type="button" variant="outlined" onClick={() => void openCaptureFromScopeBinding()}>Capture from scope binding</Button>
+              <Button type="button" variant="outlined" onClick={() => void openCaptureFromScopeBinding()}>Fill out with scope default</Button>
               <Button type="button" variant="outlined" onClick={async () => {
                 setView("submissions");
                 await loadSubmissions(true);
-              }}>Browse submissions</Button>
+              }}>Browse responses</Button>
             </Stack>
             <FormManager
               forms={managerForms}
@@ -591,23 +567,26 @@ export function App(): ReactElement {
 
         {view === "settings" ? (
           <Stack spacing={2}>
-            <Typography variant="h6">Workspace/project binding controls</Typography>
+            <Typography variant="h6">Default form version by scope</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Choose which published form version people receive by default in each scope. A project can inherit workspace defaults or override them.
+            </Typography>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel id="scope-type-label">Scope type</InputLabel>
-                <Select labelId="scope-type-label" label="Scope type" value={bindingScopeType} onChange={(event) => {
+                <InputLabel id="scope-type-label">Scope level</InputLabel>
+                <Select labelId="scope-type-label" label="Scope level" value={bindingScopeType} onChange={(event) => {
                   const nextType = event.target.value as BindingScopeType;
                   setBindingScopeType(nextType);
                   setBindingScopeId(nextType === "workspace" ? "example-workspace" : "example-project");
                   setBinding(null);
                 }}>
-                  <MenuItem value="workspace">workspace</MenuItem>
-                  <MenuItem value="project">project</MenuItem>
+                  <MenuItem value="workspace">Workspace</MenuItem>
+                  <MenuItem value="project">Project</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 220 }}>
-                <InputLabel id="scope-id-label">Scope id</InputLabel>
-                <Select labelId="scope-id-label" label="Scope id" value={bindingScopeId} onChange={(event) => setBindingScopeId(String(event.target.value))}>
+                <InputLabel id="scope-id-label">Scope ID</InputLabel>
+                <Select labelId="scope-id-label" label="Scope ID" value={bindingScopeId} onChange={(event) => setBindingScopeId(String(event.target.value))}>
                   <MenuItem value={bindingScopeType === "workspace" ? "example-workspace" : "example-project"}>{bindingScopeType === "workspace" ? "example-workspace" : "example-project"}</MenuItem>
                 </Select>
               </FormControl>
@@ -623,10 +602,10 @@ export function App(): ReactElement {
 
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel id="binding-mode-label">Binding mode</InputLabel>
-                <Select labelId="binding-mode-label" label="Binding mode" value={bindingMode} onChange={(event) => setBindingMode(event.target.value as "latest" | "pinned")}>
-                  <MenuItem value="latest">latest</MenuItem>
-                  <MenuItem value="pinned">pinned</MenuItem>
+                <InputLabel id="binding-mode-label">Default version behavior</InputLabel>
+                <Select labelId="binding-mode-label" label="Default version behavior" value={bindingMode} onChange={(event) => setBindingMode(event.target.value as "latest" | "pinned")}>
+                  <MenuItem value="latest">Always latest published version</MenuItem>
+                  <MenuItem value="pinned">Pin a specific published version</MenuItem>
                 </Select>
               </FormControl>
               <FormControl size="small" sx={{ minWidth: 280 }}>
@@ -659,7 +638,7 @@ export function App(): ReactElement {
                 } catch (error) {
                   setStatus(error instanceof Error ? error.message : "Binding save failed");
                 }
-              }}>Save binding</Button>
+              }}>Save default</Button>
               <Button type="button" variant="outlined" disabled={bindingScopeType !== "project" || !binding} onClick={async () => {
                 if (!binding) return;
                 try {
@@ -669,15 +648,16 @@ export function App(): ReactElement {
                 } catch (error) {
                   setStatus(error instanceof Error ? error.message : "Binding reset failed");
                 }
-              }}>Reset to inheritance</Button>
+              }}>Reset project to workspace default</Button>
             </Stack>
 
             <Typography variant="body2" color="text.secondary">
-              Active binding: {binding ? `${binding.source.type}/${binding.source.id} -> ${binding.mode} (${binding.definitionId}) rev ${binding.revision}` : "none"}
+              Active default: {binding ? `${binding.source.type}/${binding.source.id} -> ${binding.mode} (${binding.definitionId}) rev ${binding.revision}` : "none"}
             </Typography>
 
             <Stack spacing={1}>
-              <Typography variant="h6">Published versions</Typography>
+              <Typography variant="h6">Published form versions</Typography>
+              <Typography variant="caption" color="text.secondary">Use this for form design history. Response revision history is available from each response in the Responses view.</Typography>
               <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
                 <FormControl size="small" sx={{ minWidth: 260 }}>
                   <InputLabel id="published-version-label">Version</InputLabel>
@@ -703,7 +683,7 @@ export function App(): ReactElement {
                     await openPublishedVersionReadOnly(activeId, Number(selectedPublicationVersion));
                   }}
                 >
-                  Open selected version read only
+                  Open selected form version
                 </Button>
               </Stack>
             </Stack>
@@ -799,12 +779,13 @@ export function App(): ReactElement {
 
         {view === "submissions" ? (
           <Stack spacing={1.5}>
-            <Typography variant="h6">Submissions</Typography>
+            <Typography variant="h6">Responses</Typography>
+            <Typography variant="body2" color="text.secondary">Browse saved responses, then choose a response-specific action: view, edit, or revision history.</Typography>
             <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
               <TextField size="small" label="Created by" value={submissionCreatorFilter} onChange={(event) => setSubmissionCreatorFilter(event.target.value)} />
               <TextField size="small" label="Record or form search" value={submissionSearch} onChange={(event) => setSubmissionSearch(event.target.value)} />
-              <TextField size="small" type="date" label="From" value={submissionDateFrom} onChange={(event) => setSubmissionDateFrom(event.target.value)} />
-              <TextField size="small" type="date" label="To" value={submissionDateTo} onChange={(event) => setSubmissionDateTo(event.target.value)} />
+              <TextField size="small" type="date" label="From" slotProps={{ inputLabel: { shrink: true } }} value={submissionDateFrom} onChange={(event) => setSubmissionDateFrom(event.target.value)} />
+              <TextField size="small" type="date" label="To" slotProps={{ inputLabel: { shrink: true } }} value={submissionDateTo} onChange={(event) => setSubmissionDateTo(event.target.value)} />
               <Button type="button" variant="contained" onClick={() => void loadSubmissions(true)}>Apply filters</Button>
             </Stack>
             {submissions.map((submission) => (
@@ -817,21 +798,22 @@ export function App(): ReactElement {
                     <Typography variant="body2" color="text.secondary">Revision {submission.currentRevisionNumber ?? "-"}</Typography>
                   </Box>
                   <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-                    <Button type="button" variant="outlined" onClick={() => void openReadOnlyRecord(submission.recordId)}>Read only</Button>
-                    <Button type="button" variant="outlined" onClick={() => void openEditRecord(submission.recordId)}>Edit</Button>
-                    <Button type="button" variant="outlined" onClick={() => void openRecordHistory(submission.recordId)}>History</Button>
+                    <Button type="button" variant="outlined" onClick={() => void openReadOnlyRecord(submission.recordId)}>View response</Button>
+                    <Button type="button" variant="outlined" onClick={() => void openEditRecord(submission.recordId)}>Edit response</Button>
+                    <Button type="button" variant="outlined" onClick={() => void openRecordHistory(submission.recordId)}>Response history</Button>
                   </Stack>
                 </Stack>
               </Paper>
             ))}
-            {!submissions.length ? <Typography variant="body2" color="text.secondary">No submissions found for the current filters.</Typography> : null}
+            {!submissions.length ? <Alert severity="info">{submissionCreatorFilter || submissionSearch || submissionDateFrom || submissionDateTo ? "No responses match the current filters. Adjust or clear filters to widen results." : "No responses yet. Fill out the form once to create the first response."}</Alert> : null}
             <Button type="button" variant="outlined" disabled={submissionsCursor === null} onClick={() => void loadSubmissions(false)}>Load more</Button>
           </Stack>
         ) : null}
 
         {view === "readOnly" && readOnlyDefinition ? (
           <Stack spacing={1.5}>
-            <Typography variant="h6">Read-only rendering</Typography>
+            <Typography variant="h6">Response view (read-only)</Typography>
+            <Typography variant="caption" color="text.secondary">This shows saved response values without edit controls.</Typography>
             <FormRenderer
               key={`readonly:${readOnlyDefinition.id}`}
               renderIdentity={`readonly:${sessionTenantId}:${readOnlyDefinition.id}`}
@@ -844,13 +826,15 @@ export function App(): ReactElement {
 
         {view === "history" && recordHistory.length > 0 && activeDefinition ? (
           <Stack spacing={1.5}>
+            <Typography variant="h6">Response revision history</Typography>
+            <Typography variant="caption" color="text.secondary">This history is for one response record. Form design version history is in Workspace settings.</Typography>
             <Button type="button" variant="outlined" onClick={async () => {
               if (!historyRecordId) {
                 setStatus("No history record is available to edit.");
                 return;
               }
               await openEditRecord(historyRecordId);
-            }}>Edit latest record</Button>
+            }}>Edit this response</Button>
             <RecordHistoryView
               definition={activeDefinition.definition}
               revisions={recordHistory.map((item) => ({
