@@ -107,5 +107,9 @@ revision), reset-to-inheritance behavior, binding-aware capture entry, record
 edit continuity from history, backend source-driven fields, and upload field
 handling in the walkthrough app. Renderer identity/async isolation tests in
 `packages/form-react` are implemented and passing in default test profiles.
-Dedicated native PostgreSQL execution remains the unchanged blocker for final
-closure of DB-backed acceptance IDs.
+This branch now also includes record-age retention policy controls in
+`packages/form-server` (`recordMaxAgeMs` + `recordRetentionMode`) backed by
+repository selection logic in `packages/form-postgres`. Dedicated native
+PostgreSQL execution has been run locally with `FORM_TEST_DB_URL` and the
+integration suite now passes for persistence + server acceptance, including
+native concurrent idempotency and retention-selection coverage.

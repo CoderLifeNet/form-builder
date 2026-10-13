@@ -145,7 +145,11 @@ export function createFormServer(options?: {
   repository?: FormRepository;
   uploadStorage?: UploadStorageAdapter;
   bindingAncestors?: (ctx: AuthContext, scope: { type: string; id: string }) => Promise<Array<{ type: string; id: string }>>;
-  retentionPolicy?: { pendingUploadMaxAgeMs: number };
+  retentionPolicy?: {
+    pendingUploadMaxAgeMs?: number;
+    recordMaxAgeMs?: number;
+    recordRetentionMode?: "archived_forms_only" | "all_forms";
+  };
 }): express.Express {
   const policyAdapter = options?.policyAdapter ?? createDefaultPolicyAdapter();
   const sourceRegistry = options?.sourceRegistry ?? createDefaultSourceRegistry();
@@ -817,11 +821,40 @@ export function createFormServer(options?: {
     try {
       const ctx = await policyAdapter.resolveContext(req);
       await requireCapability(policyAdapter, ctx, "forms.delete");
-      const maxAge = options?.retentionPolicy?.pendingUploadMaxAgeMs;
-      if (maxAge !== undefined && (!Number.isFinite(maxAge) || maxAge < 60000)) throw new Error("INVALID_RETENTION_POLICY");
+      const pendingUploadMaxAge = options?.retentionPolicy?.pendingUploadMaxAgeMs;
+      const recordMaxAge = options?.retentionPolicy?.recordMaxAgeMs;
+      const recordRetentionMode = options?.retentionPolicy?.recordRetentionMode ?? "archived_forms_only";
+
+      if (pendingUploadMaxAge !== undefined && (!Number.isFinite(pendingUploadMaxAge) || pendingUploadMaxAge < 60000)) {
+        throw new Error("INVALID_RETENTION_POLICY");
+      }
+      if (recordMaxAge !== undefined && (!Number.isFinite(recordMaxAge) || recordMaxAge < 60000)) {
+        throw new Error("INVALID_RETENTION_POLICY");
+      }
+
       let deleted = 0;
       let pending = 0;
-      if (maxAge !== undefined) for (const upload of await repository.listExpiredUploads(ctx, maxAge)) {
+      const attemptedObjectKeys = new Set<string>();
+
+      if (recordMaxAge !== undefined) {
+        const retentionRecordIds = await repository.listRetentionEligibleRecords(ctx, recordMaxAge, recordRetentionMode);
+        for (const recordId of retentionRecordIds) {
+          const erased = await repository.deleteRecordAndRevisions({ tenantId: ctx.tenantId, actorId: ctx.actorId }, recordId);
+          deleted += 1;
+          for (const objectKey of erased.objectKeys) {
+            attemptedObjectKeys.add(objectKey);
+            try {
+              await uploadStorage.deleteObject({ tenantId: ctx.tenantId, objectKey });
+              await repository.acknowledgeStorageDeletion(ctx, objectKey);
+              deleted += 1;
+            } catch {
+              pending += 1;
+            }
+          }
+        }
+      }
+
+      if (pendingUploadMaxAge !== undefined) for (const upload of await repository.listExpiredUploads(ctx, pendingUploadMaxAge)) {
         try {
           await repository.markUploadDeletionPending(ctx, upload.id);
           await uploadStorage.deleteObject({ tenantId: ctx.tenantId, objectKey: upload.objectKey });
@@ -830,6 +863,9 @@ export function createFormServer(options?: {
         } catch { pending++; }
       }
       for (const objectKey of await repository.listStorageDeletions(ctx)) {
+        if (attemptedObjectKeys.has(objectKey)) {
+          continue;
+        }
         try {
           await uploadStorage.deleteObject({ tenantId: ctx.tenantId, objectKey });
           await repository.acknowledgeStorageDeletion(ctx, objectKey);

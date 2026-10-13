@@ -34,7 +34,9 @@ Include the resolved `binding` scopeType/scopeId/revision/definitionId in a new
 record request to detect changed bindings/publications before submission. The
 submitted definition is an immutable authorized snapshot; record history always
 uses its stored definition ID. Binding edits never rewrite historical records.
-The full example binding editor and concurrent-resolution DB checks remain pending.
+The workspace example now includes binding controls (latest/pinned + reset to
+inheritance), and native PostgreSQL integration checks cover binding/concurrency
+paths in this repository.
 
 ## Sources and capability reconciliation
 
@@ -55,9 +57,14 @@ Run migrations before starting the updated server. `0002_storage_deletion_queue`
 adds a durable erasure retry queue and binding revisions. Migration tests include
 an isolated 0001-to-0002 upgrade preserving a published record.
 
-Configure `retentionPolicy.pendingUploadMaxAgeMs` on the server and schedule an
-authorized `POST /api/maintenance/storage-cleanup`. It expires only unattached
-uploads and retries queued storage deletions. Record erasure responds 202 while
+Configure retention controls on the server and schedule an authorized
+`POST /api/maintenance/storage-cleanup`:
+
+- `retentionPolicy.pendingUploadMaxAgeMs` expires unattached uploads.
+- `retentionPolicy.recordMaxAgeMs` enables policy-driven record-age retention.
+- `retentionPolicy.recordRetentionMode` chooses `archived_forms_only` or `all_forms`.
+
+The maintenance endpoint retries queued storage deletions and now also executes
+record-age retention under host policy. Record erasure responds 202 while
 objects still need cleanup; 204 means its object deletions completed. Attached
-uploads cannot be deleted through the standalone upload endpoint. Record-age
-retention controls and the full shared-history reference lifecycle are unfinished.
+uploads cannot be deleted through the standalone upload endpoint.

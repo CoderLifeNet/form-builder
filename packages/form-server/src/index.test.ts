@@ -292,3 +292,33 @@ it("reports incomplete erasure and supports authorized storage cleanup retry",as
  const cleanup=await request(app).post("/api/maintenance/storage-cleanup");
  expect(cleanup.status).toBe(200);expect(cleanup.body).toEqual({deleted:1,pending:0});
 });
+
+it("applies record-age retention policy controls beyond upload cleanup queues",async()=>{
+ const deletedRecords:string[]=[];
+ const acknowledged:string[]=[];
+ const deletedObjects:string[]=[];
+ const app=createFormServer({
+  policyAdapter:allowCapabilities(["forms.delete"]),
+  retentionPolicy:{recordMaxAgeMs:60_000,recordRetentionMode:"archived_forms_only",pendingUploadMaxAgeMs:24*60*60*1000},
+  repository:{
+   ...makeRepositoryStub(),
+   listRetentionEligibleRecords:async()=>["record_old_1"],
+   deleteRecordAndRevisions:async(_ctx:any,recordId:string)=>{deletedRecords.push(recordId);return {objectKeys:[`tenant_demo/${recordId}/file`]};},
+   listExpiredUploads:async()=>[],
+   listStorageDeletions:async()=>["tenant_demo/queued_only"],
+   acknowledgeStorageDeletion:async(_ctx:any,objectKey:string)=>{acknowledged.push(objectKey);}
+  } as any,
+  uploadStorage:{
+   storeObject:async()=>({objectKey:"unused",sizeBytes:0}),
+   getObject:async()=>{throw new Error("unused");},
+   deleteObject:async({objectKey})=>{deletedObjects.push(objectKey);}
+  }
+ });
+
+ const cleanup=await request(app).post("/api/maintenance/storage-cleanup");
+ expect(cleanup.status).toBe(200);
+ expect(cleanup.body).toEqual({deleted:3,pending:0});
+ expect(deletedRecords).toEqual(["record_old_1"]);
+ expect(deletedObjects).toEqual(["tenant_demo/record_old_1/file","tenant_demo/queued_only"]);
+ expect(acknowledged).toEqual(["tenant_demo/record_old_1/file","tenant_demo/queued_only"]);
+});

@@ -699,6 +699,28 @@ export class FormRepository {
     return rows.rows.map(row => ({ id: String(row.id), objectKey: String(row.object_key) }));
   }
 
+  async listRetentionEligibleRecords(
+    ctx: DbContext,
+    maxAgeMs: number,
+    mode: "archived_forms_only" | "all_forms"
+  ): Promise<string[]> {
+    const rows = await this.pool.query(
+      `
+      SELECT r.id
+      FROM records r
+      JOIN forms f ON f.id = r.form_id AND f.tenant_id = r.tenant_id
+      WHERE r.tenant_id = $1
+        AND r.created_at < NOW() - ($2 * INTERVAL '1 millisecond')
+        AND ($3::text = 'all_forms' OR f.archived = true)
+      ORDER BY r.created_at ASC, r.id ASC
+      LIMIT 100
+      `,
+      [ctx.tenantId, maxAgeMs, mode]
+    );
+
+    return rows.rows.map((row) => String(row.id));
+  }
+
   async listRecordRevisions(ctx: DbContext, recordId: string): Promise<Array<{
     id: string;
     revisionNumber: number;

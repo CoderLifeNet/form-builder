@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { FormRepository, makePool, MigrationRunner } from "./index.js";
+import { createStableId } from "@coderlifenet/form-core";
 
 const dbUrl = process.env.FORM_RUN_DB_TESTS === "true" ? process.env.FORM_TEST_DB_URL : undefined;
 
@@ -153,3 +154,43 @@ integration("transactional record idempotency",()=>{
   expect(Number(rows.rows[0].count)).toBe(1);
  });
 });
+
+  integration("retention policy record selection",()=>{
+   let pool: ReturnType<typeof makePool>;
+   let repo: FormRepository;
+   const ctx={tenantId:`retention_${Date.now()}`,actorId:"owner"};
+   beforeAll(async()=>{pool=makePool(dbUrl);repo=new FormRepository(pool);await new MigrationRunner(pool).migrate();});
+   afterAll(async()=>{await pool.end();});
+   it("selects old records by mode without crossing tenants",async()=>{
+    const makePublishedForm=async(name:string)=>{
+     const created=await repo.createForm(ctx,{name,draft:{metadata:{formId:createStableId("form"),name,schemaVersion:"1.0.0"},sections:[],fields:[],dependencyVersions:{}}});
+     const published=await repo.publishDraft(ctx,created.formId,created.draftRevision);
+     return {formId:created.formId,definitionId:published.definitionId};
+    };
+
+    const archived=await makePublishedForm("Archived retention form");
+    const active=await makePublishedForm("Active retention form");
+    await repo.archiveForm(ctx,archived.formId,true);
+
+    const archivedRecord=await repo.createRecordRevision({ctx,formId:archived.formId,definitionId:archived.definitionId,values:{status:"archived"},selectedLabels:{}});
+    const activeRecord=await repo.createRecordRevision({ctx,formId:active.formId,definitionId:active.definitionId,values:{status:"active"},selectedLabels:{}});
+
+    const outsiderCtx={tenantId:`${ctx.tenantId}_other`,actorId:"outsider"};
+    const outsiderForm=await repo.createForm(outsiderCtx,{name:"Outsider",draft:{metadata:{formId:createStableId("form"),name:"Outsider",schemaVersion:"1.0.0"},sections:[],fields:[],dependencyVersions:{}}});
+    const outsiderPublished=await repo.publishDraft(outsiderCtx,outsiderForm.formId,outsiderForm.draftRevision);
+    const outsiderRecord=await repo.createRecordRevision({ctx:outsiderCtx,formId:outsiderForm.formId,definitionId:outsiderPublished.definitionId,values:{status:"outsider"},selectedLabels:{}});
+
+    await pool.query("UPDATE records SET created_at = NOW() - INTERVAL '10 days', updated_at = NOW() - INTERVAL '10 days' WHERE id = ANY($1::text[])", [[archivedRecord.recordId, activeRecord.recordId]]);
+
+    const archivedOnly=await repo.listRetentionEligibleRecords(ctx,24*60*60*1000,"archived_forms_only");
+    expect(archivedOnly).toContain(archivedRecord.recordId);
+    expect(archivedOnly).not.toContain(activeRecord.recordId);
+
+    const allForms=await repo.listRetentionEligibleRecords(ctx,24*60*60*1000,"all_forms");
+    expect(allForms).toContain(archivedRecord.recordId);
+    expect(allForms).toContain(activeRecord.recordId);
+
+    const outsiderVisible=await repo.listRetentionEligibleRecords(ctx,24*60*60*1000,"all_forms");
+    expect(outsiderVisible).not.toContain(outsiderRecord.recordId);
+   });
+  });

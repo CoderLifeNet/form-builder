@@ -572,7 +572,8 @@ export function App(): ReactElement {
 
         {view === "capture" && activeDefinition && activeId ? (
           <FormRenderer
-            key={`${activeDefinition.id}:${captureRecordId ?? "new"}`}
+            key={`${sessionTenantId}:${activeId}:${activeDefinition.id}:${captureRecordId ?? "new"}`}
+            renderIdentity={`${sessionTenantId}:${activeId}:${activeDefinition.id}:${captureRecordId ?? "new"}`}
             uploadFile={createHttpUploadHandler(apiBase, activeId, activeDefinition.id)}
             definition={activeDefinition.definition}
             initialValues={captureInitialValues}

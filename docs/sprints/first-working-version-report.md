@@ -4,6 +4,63 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: native PostgreSQL closure + retention policy controls (2026-10-13)
+
+Branch: `feat/ui-0.2-integration`.
+
+Implemented in this tranche:
+
+- Added explicit record-age retention policy controls in server maintenance flow (`recordMaxAgeMs` and `recordRetentionMode`) so retention is not limited to upload cleanup queues.
+- Extended storage cleanup execution to process retention-eligible records and their object references while preserving retry bookkeeping for failed deletions.
+- Added repository support for retention selection (`listRetentionEligibleRecords`) with tenant scoping and archived-only vs all-forms policy modes.
+- Added server route coverage for policy execution and repository native integration coverage for retention record selection.
+- Updated workspace example capture flow to use explicit host-controlled renderer identity (`tenant + form + definition + record`) now that `FormRenderer` supports `renderIdentity`.
+
+Dedicated native PostgreSQL execution (local disposable database, no production/app data):
+
+| Command | Result |
+| --- | --- |
+| `docker compose up -d postgres` | PASS (local PostgreSQL available on `localhost:55432`). |
+| `docker exec formbuilder-postgres psql -U formbuilder -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='formbuilder_test'" \| grep -q 1 \|\| docker exec formbuilder-postgres createdb -U formbuilder formbuilder_test` | PASS (dedicated disposable test DB ensured). |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:integration` | PASS (`@coderlifenet/form-postgres` 6/6 including native concurrent idempotency + retention selection test; `@coderlifenet/form-server` acceptance integration 6/6). |
+
+Routine verification (fixture/mock profile + browser + packed consumer):
+
+| Command | Result |
+| --- | --- |
+| `npm run build` | PASS across packages and both examples. |
+| `npm run typecheck` | PASS across workspace packages and both examples. |
+| `npm test` | PASS in default fixture/mock profile; DB-gated suites skipped by design in this profile. |
+| `npm run test:browser` | PASS: 14 Playwright checks (desktop + narrow widths; WCAG + keyboard/focus flows). |
+| `npm run pack:artifacts` | PASS (fresh tarballs). |
+| `npm run verify:consumer` | PASS (isolated packed-consumer install and runtime smoke). |
+
+### Current blocker split
+
+Functional blockers:
+
+1. None identified in this tranche for the required first-consumer path.
+
+Verification blockers:
+
+1. Human accessibility review remains pending for Chris by definition (automated checks are passing but do not replace human review).
+
+Deferred polish (non-blocking for first working version behavior):
+
+1. Broader source pagination/search ergonomics beyond current source-refresh and stale-result protections.
+2. Expanded dialog/assistive-technology manual scenario matrix beyond current automated keyboard/WCAG/browser checks.
+3. Additional storage-provider hardening breadth beyond baseline private-filesystem path and existing contract coverage.
+
+### First-consumer walkthrough for Chris
+
+1. Start infrastructure and server with dev auth (`docker compose up -d postgres`; run server with `FORM_DEV_AUTH=true`).
+2. Open workspace example app and confirm session starts as `owner1` in `tenant_alpha`.
+3. In **Settings**: save workspace binding in `latest`, switch to `project`, save `pinned`, then use **Reset to inheritance**.
+4. In **Manager**: use **Capture from scope binding**, submit a record with category + attachment, then open **History**.
+5. Use **Edit latest record** to reopen capture in edit mode and save another revision.
+6. Switch session to `collab1` and confirm allowed read/submit/edit paths still work; switch to `outsider1` and verify permission isolation behavior.
+7. Validate builder draft continuity by opening **Builder**, editing, saving/publishing, navigating away, and reopening.
+
 ## Continuation: workspace consumer path implementation tranche (2026-10-13)
 
 Branch: `feat/ui-0.2-integration`.

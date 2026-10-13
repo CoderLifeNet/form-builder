@@ -80,6 +80,12 @@ function createBaseDefinition(name: string): FormDefinition {
   };
 }
 
+let idempotencyCounter = 0;
+function nextIdempotencyKey(): string {
+  idempotencyCounter += 1;
+  return `idem_${Date.now()}_${idempotencyCounter}`;
+}
+
 integration("form server acceptance integration", () => {
   let pool: ReturnType<typeof makePool>;
   let repo: FormRepository;
@@ -156,7 +162,7 @@ integration("form server acceptance integration", () => {
     const firstSubmit = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId,
           definitionId: definitionV1Id,
@@ -317,7 +323,7 @@ integration("form server acceptance integration", () => {
     const missingTitle = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publish.body.definitionId,
@@ -337,7 +343,7 @@ integration("form server acceptance integration", () => {
     const success = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publish.body.definitionId,
@@ -430,7 +436,7 @@ integration("form server acceptance integration", () => {
     const saved = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publish.body.definitionId,
@@ -600,7 +606,7 @@ integration("form server acceptance integration", () => {
     const saved = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publishV1.body.definitionId,
@@ -707,7 +713,7 @@ integration("form server acceptance integration", () => {
     const submitted = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: published.body.definitionId,

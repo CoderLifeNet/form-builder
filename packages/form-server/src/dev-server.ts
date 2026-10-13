@@ -2,7 +2,11 @@ import { createFormServer } from "./index.js";
 
 const port = Number(process.env.PORT ?? 4010);
 const app = createFormServer({
-  retentionPolicy: { pendingUploadMaxAgeMs: 24 * 60 * 60 * 1000 },
+  retentionPolicy: {
+    pendingUploadMaxAgeMs: 24 * 60 * 60 * 1000,
+    recordMaxAgeMs: 90 * 24 * 60 * 60 * 1000,
+    recordRetentionMode: "archived_forms_only"
+  },
   async bindingAncestors(_ctx, scope) {
     // Demo host relationship; production hosts resolve this from their own membership data.
     return scope.type === "project" && scope.id === "example-project"
