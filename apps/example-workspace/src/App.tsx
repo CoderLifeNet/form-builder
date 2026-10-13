@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactElement } from "react";
 import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder";
-import { FormRenderer, RecordHistoryView } from "@coderlifenet/form-react";
+import { createHttpUploadHandler, FormRenderer, RecordHistoryView } from "@coderlifenet/form-react";
 import type { FormDefinition } from "@coderlifenet/form-core";
 import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
@@ -33,6 +33,7 @@ type ApiRecordRevision = {
   revisionNumber: number;
   definitionId: string;
   values: Record<string, unknown>;
+  selectedLabels?: Record<string, string>;
   createdAt: string;
 };
 
@@ -115,12 +116,15 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function App(): JSX.Element {
+export function App(): ReactElement {
+  const [sourceCapabilities, setSourceCapabilities] = useState<Record<string, string>>({});
   const [view, setView] = useState<View>("manager");
   const [useCustomTheme, setUseCustomTheme] = useState(false);
   const [forms, setForms] = useState<ApiForm[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeDraft, setActiveDraft] = useState<ApiDraft | null>(null);
+  const draftRevision = useRef<number>(0);
+  draftRevision.current = activeDraft?.revision ?? 0;
   const [activeDefinition, setActiveDefinition] = useState<ApiDefinition | null>(null);
   const [recordHistory, setRecordHistory] = useState<ApiRecordRevision[]>([]);
   const [historyDefinitions, setHistoryDefinitions] = useState<Record<string, FormDefinition>>({});
@@ -150,6 +154,7 @@ export function App(): JSX.Element {
         });
         setStatus("Connected as owner1");
         await refreshForms();
+        setSourceCapabilities(await api<Record<string,string>>("/api/capabilities/sources"));
       } catch (error) {
         setStatus(error instanceof Error ? error.message : "Unable to connect");
       }
@@ -320,14 +325,19 @@ export function App(): JSX.Element {
           />
         ) : null}
 
-        {view === "builder" && activeDraft && activeId ? (
+        {activeDraft && activeId ? (
+          <Box hidden={view !== "builder"}>
           <FormBuilder
             initialDefinition={activeDraft.definition}
+            sourceCapabilities={sourceCapabilities}
+            onSaved={() => setView("manager")}
+            onReloadDraft={async () => { const draft = await api<ApiDraft>(`/api/forms/${activeId}/draft`); draftRevision.current = draft.revision; setActiveDraft(draft); return draft.definition; }}
             onSaveDraft={async (nextDefinition) => {
               const saved = await api<{ revision: number }>(`/api/forms/${activeId}/draft`, {
                 method: "PUT",
-                body: JSON.stringify({ expectedRevision: activeDraft.revision, definition: nextDefinition })
+                body: JSON.stringify({ expectedRevision: draftRevision.current, definition: nextDefinition })
               });
+              draftRevision.current = saved.revision;
               setActiveDraft({ revision: saved.revision, definition: nextDefinition });
               await refreshForms();
               setStatus(`Draft saved r${saved.revision}`);
@@ -335,22 +345,35 @@ export function App(): JSX.Element {
             onPublish={async (nextDefinition) => {
               const saved = await api<{ revision: number }>(`/api/forms/${activeId}/draft`, {
                 method: "PUT",
-                body: JSON.stringify({ expectedRevision: activeDraft.revision, definition: nextDefinition })
+                body: JSON.stringify({ expectedRevision: draftRevision.current, definition: nextDefinition })
               });
+              draftRevision.current = saved.revision;
+              setActiveDraft({ revision: saved.revision, definition: nextDefinition });
               const published = await api<{ definitionId: string; publicationVersion: number }>(`/api/forms/${activeId}/publish`, {
                 method: "POST",
                 body: JSON.stringify({ expectedRevision: saved.revision })
               });
+              draftRevision.current = saved.revision;
               setActiveDraft({ revision: saved.revision, definition: nextDefinition });
               await refreshForms();
               setStatus(`Published v${published.publicationVersion}`);
             }}
           />
+          </Box>
         ) : null}
 
         {view === "capture" && activeDefinition && activeId ? (
           <FormRenderer
+            key={activeDefinition.id}
+            uploadFile={createHttpUploadHandler(apiBase, activeId, activeDefinition.id)}
             definition={activeDefinition.definition}
+            optionSourceResolver={async (sourceId, values, signal) => {
+              const field = activeDefinition.definition.fields.find(field => field.source?.id === sourceId);
+              if (!field) throw new Error("Source field not found");
+              const response = await fetch(`${apiBase}/api/definitions/${activeDefinition.id}/sources/${field.id}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }), signal });
+              if (!response.ok) throw new Error("Source request failed");
+              return (await response.json()).value;
+            }}
             mode="new"
             onSubmit={async (values) => {
               const result = await api<{ recordId: string }>("/api/records", {
@@ -361,7 +384,8 @@ export function App(): JSX.Element {
                 body: JSON.stringify({
                   formId: activeId,
                   definitionId: activeDefinition.id,
-                  values
+                  values,
+                  uploadIds: activeDefinition.definition.fields.filter(field => field.type === "single_file" || field.type === "multi_file").flatMap(field => Array.isArray(values[field.id]) ? values[field.id] as string[] : values[field.id] ? [String(values[field.id])] : [])
                 })
               });
               setLastRecordId(result.recordId);
@@ -387,6 +411,7 @@ export function App(): JSX.Element {
               revisionNumber: item.revisionNumber,
               savedAt: item.createdAt,
               values: item.values,
+              selectedLabels: item.selectedLabels,
               definition: historyDefinitions[item.definitionId]
             }))}
           />

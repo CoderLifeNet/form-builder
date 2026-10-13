@@ -1,4 +1,6 @@
 import {
+  assertSafeInput,
+  copyDefinition,
   evaluateRule,
   type FieldType,
   type FormDefinition,
@@ -20,12 +22,12 @@ export async function applyDefinitionSources(
 
   for (const field of definition.fields) {
     const source = field.source;
-    if (!source) {
+    if (!source || source.kind === "options" || source.mode === "manual") {
       continue;
     }
 
     const existing = next[field.id];
-    if (existing !== undefined && source.mode !== "display_only") {
+    if (existing !== undefined && source.mode !== "display_only" && source.mode !== "refresh_on_edit") {
       continue;
     }
 
@@ -52,6 +54,10 @@ export async function validateSubmissionAgainstDefinition(
     }
 
     const value = values[field.id];
+    if (field.type === "multi_file" && Array.isArray(value) && value.length > (field.uploadPolicy?.maxFiles ?? 100)) {
+      errors.push({fieldId:field.id,code:"UPLOAD_COUNT",message:"Too many files for this field"});
+      continue;
+    }
     if (state.required && isMissingValue(value)) {
       errors.push({ fieldId: field.id, code: "REQUIRED", message: `${field.label} is required` });
       continue;
@@ -202,8 +208,9 @@ export function exportDefinitionEnvelope(definition: FormDefinition): {
 }
 
 export function importDefinitionEnvelope(input: unknown): FormDefinition {
+  assertSafeInput(input);
   const schema = z.object({
-    formatVersion: z.number().int().positive(),
+    formatVersion: z.literal(1),
     definition: z.unknown(),
     dependencies: z.record(z.string(), z.string()).optional()
   });
@@ -217,53 +224,7 @@ export function importDefinitionEnvelope(input: unknown): FormDefinition {
 }
 
 export function remapDefinitionStableIds(definition: FormDefinition): FormDefinition {
-  const sectionIdMap = new Map<string, string>();
-  const fieldIdMap = new Map<string, string>();
-  const optionIdMap = new Map<string, string>();
-
-  const sections = definition.sections.map((section, index) => {
-    const nextId = `section_${index + 1}_${Date.now().toString(36)}`;
-    sectionIdMap.set(section.id, nextId);
-    return { ...section, id: nextId };
-  });
-
-  for (const [index, field] of definition.fields.entries()) {
-    const nextFieldId = `field_${index + 1}_${Date.now().toString(36)}`;
-    fieldIdMap.set(field.id, nextFieldId);
-  }
-
-  const fields = definition.fields.map((field) => {
-    const nextFieldId = fieldIdMap.get(field.id) ?? field.id;
-
-    const options = field.options?.map((option, optionIndex) => {
-      const nextOptionId = `${nextFieldId}_opt_${optionIndex + 1}`;
-      optionIdMap.set(option.id, nextOptionId);
-      return { ...option, id: nextOptionId };
-    });
-
-    return {
-      ...field,
-      id: nextFieldId,
-      key: nextFieldId,
-      sectionId: sectionIdMap.get(field.sectionId) ?? field.sectionId,
-      options,
-      rules: field.rules.map((rule) => ({
-        ...rule,
-        sourceFieldId: fieldIdMap.get(rule.sourceFieldId) ?? rule.sourceFieldId,
-        value: optionIdMap.get(String(rule.value ?? "")) ?? rule.value
-      }))
-    };
-  });
-
-  return {
-    ...definition,
-    sections,
-    fields,
-    metadata: {
-      ...definition.metadata,
-      formId: `imported_${Date.now().toString(36)}`
-    }
-  };
+  return copyDefinition(definition);
 }
 
 export function previewRecordMigration(

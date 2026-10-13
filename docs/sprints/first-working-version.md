@@ -71,3 +71,15 @@ Evidence location conventions:
 
 - Host port `5432` conflict required remapping local Postgres to `55432`.
 - Remaining acceptance gaps are narrowed to advanced lifecycle/policy surfaces: unresolved dependency reconciliation UX, retention-policy controls, and automated accessibility coverage.
+
+
+## Published UI continuation (2026-10-12)
+
+- UI dependency contract and scoped settings: implemented and independently tested.
+- Draft autosave/continuity: implemented; in-flight edit and failed-save tests pass.
+- Source, import, upload, binding and retention continuation: implemented portions
+  and remaining requirements are recorded in the latest report; not full closure.
+- Automated UI accessibility: basic desktop/narrow surfaces tested; human review pending.
+- Database execution: blocked in this environment. Run the 9 DB-dependent tests on
+  the normal local PostgreSQL setup, including the 0001-to-0002 upgrade test.
+- Original A04/A09/A12/A13/A15/A16/A18/A19/A21 remain partial; no requirement is erased.

@@ -18,3 +18,6 @@ These documents describe the intended product. They are not evidence of implemen
 Documentation baseline: October 10, 2026. Runtime implementation is now in active first-working-version delivery; use sprint docs for tested evidence.
 
 Update the decision log when a decision changes. Update requirements and roadmap together when scope changes. Do not infer approval of technical recommendations from approval of the overall product.
+
+- [Published UI integration](ui-integration.md)
+- [TrackForge integration boundary](trackforge-integration.md)

@@ -140,3 +140,17 @@ describe("form server", () => {
     expect(response.body.sizeBytes).toBe(5);
   });
 });
+
+it("reports incomplete erasure and supports authorized storage cleanup retry",async()=>{
+ let fail=true;let pending=["tenant_demo/object"];
+ const app=createFormServer({
+  policyAdapter:allowCapabilities(["forms.delete"]),
+  repository:{...makeRepositoryStub(),deleteRecordAndRevisions:async()=>({objectKeys:[...pending]}),listStorageDeletions:async()=>pending,acknowledgeStorageDeletion:async()=>{pending=[];}} as any,
+  uploadStorage:{storeObject:async()=>({objectKey:"unused",sizeBytes:0}),getObject:async()=>{throw new Error("unused");},deleteObject:async()=>{if(fail)throw new Error("storage unavailable");}}
+ });
+ const erasure=await request(app).delete("/api/records/record");
+ expect(erasure.status).toBe(202);expect(erasure.body.pending).toBe(1);
+ fail=false;
+ const cleanup=await request(app).post("/api/maintenance/storage-cleanup");
+ expect(cleanup.status).toBe(200);expect(cleanup.body).toEqual({deleted:1,pending:0});
+});

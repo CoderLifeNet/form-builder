@@ -8,12 +8,14 @@ This repository now contains a runnable monorepo with core contracts, a PostgreS
 
 Scope is still in active delivery. Not every requirement from `docs/prompts/first-working-version.md` is complete yet. See sprint evidence for exact pass/partial/fail items.
 
+The React packages now target the exact published `0.2.0-alpha.0` UI pair. See [UI integration](docs/ui-integration.md) for tracking, accessibility and verification.
+
 ## Quick start
 
 1. Install dependencies:
 
 ```bash
-npm install
+npm ci
 ```
 
 1. Start local infrastructure:

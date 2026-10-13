@@ -4,7 +4,93 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
-## Outcome summary
+## Current continuation: published UI pair (2026-10-12)
+
+Branch: `feat/ui-0.2-integration`, based on remote `feat/first-working-engine`
+at `316e46df1113968aeed5beae40fe9eec4ae3adc2`. No local checkout existed in this
+workspace; unpushed work on the owner's computer could not be inspected. The
+original implementation branch is preserved. This is still an unpublished
+internal 0.1.0 candidate, not a completed engine or publication decision.
+
+### Implemented
+
+- Exact ui-core/ui-components 0.2.0-alpha.0 peers/dependencies, compatible React
+  peers, lockfile and installation/type/runtime consumer checks.
+- Persisted form/field tracking and accessibility presentation, catalog validation,
+  actual ui-core scopes, default opt-out, content-free instrumentation and no
+  nested library providers. Independent copies remap tracking IDs and references.
+- Serialized autosave, manual-save completion callback, explicit reload after
+  failed/conflicting save, preserved mounted draft across example navigation,
+  and synchronous host revision tracking after a pre-publication draft save.
+- Accessible field helpers/errors/tooltips, responsive builder layout, safe empty
+  history and exact-revision label rendering. Fixed an axe contrast failure and
+  narrow-screen overflow rather than suppressing either test.
+- Cancellable option/value source initialization/refresh, stale-result protection,
+  unavailable selection preservation, trusted source API and publish-time capability
+  reconciliation. UI exposes deliberate reconnect/remove/declaration removal.
+- File picker progress/cancel/retry/removal, example HTTP upload handlers, selected
+  labels and upload IDs on submission, MIME signature/type/size checks, count checks.
+- Generic binding save/resolve/reset APIs with host-owned ancestor resolution,
+  optimistic revisions and optional submission binding verification.
+- Durable storage deletion queue, explicit incomplete-erasure response, attached
+  upload deletion protection and host-configured pending-upload expiry/retry.
+- Import size/depth/prototype checks, unsupported-format rejection, unique identity
+  validation, shared forward-reference/default/source/tracking remapping and safe
+  RE2 matching on both server and browser paths.
+
+### Verification in this environment
+
+The final command results below concern this continuation only. Earlier sections
+retain historical evidence from the previous developer environment; they are not
+fresh verification of changed database code.
+
+| Command | Result |
+| --- | --- |
+| `npm view @coderlifenet/ui-core@0.2.0-alpha.0 version peerDependencies --json` | Exact registry version and peer contract verified. |
+| `npm view @coderlifenet/ui-components@0.2.0-alpha.0 version peerDependencies --json` | Exact registry version and core peer verified. |
+| `npm ci` | PASS. |
+| `npm run build` | PASS; Vite warns about large example bundles. |
+| `npm run typecheck` | PASS across packages and both examples. |
+| `npm test` | PASS for available tests; 27 passed, 9 DB-dependent tests skipped. Skips are not passes. |
+| `npm run test:browser` | PASS: 10 desktop/narrow normal-interaction, keyboard and axe checks in the isolated UI fixture. |
+| `npm run pack:artifacts` | PASS; tests/source are excluded from runtime tarballs. |
+| `npm run verify:consumer` | PASS: real isolated tarball install plus exact registry UI pair, public exports, catalog parity, TSX compilation and SSR theme rendering. |
+| `git diff --check` | PASS. |
+
+Tests directly cover tracking scope/context, semantic IDs, content exclusion,
+ancestor opt-out, empty allowlists, consent/global disablement, no-provider use,
+accessible helpers/errors, stale option responses, in-flight autosave edits,
+failed-save preservation, multiple file selections, portable forward references,
+unsafe imports, upload policy checks and incomplete-erasure recovery responses.
+
+### Database blocker and remaining acceptance items
+
+Docker is not installed (`docker --version` fails). Portable PostgreSQL binaries
+were obtainable, but `initdb` refuses root and switching to an unprivileged user
+fails (`su: System error`). System package installation also failed due to the
+runtime's user/group restrictions. No live database or S3 acceptance is claimed.
+The original 6 server acceptance tests plus 3 persistence/upgrade tests are runnable
+with `FORM_DB_URL`; they must pass on the owner’s normal Docker/Postgres environment.
+
+All previously partial IDs remain partial until their full criteria are satisfied:
+
+| ID | New evidence / remaining work |
+| --- | --- |
+| A04 | Source refresh/cancellation/stale preservation tested; full selected-item pagination/search and unavailable-option edit policy still pending. |
+| A09 | Binding API/repository and runnable parent/pin/reset test added; full example binding editor and concurrent resolution DB verification pending. |
+| A12 | Autosave failure/in-flight edits and stale options tested; complete expiry/revocation, cross-form in-flight switch and recovery matrix pending. |
+| A13 | File controls/progress/cancel/retry plus byte/count policies added; quarantine/scanner, upload idempotency, historical file-reference lifecycle and real S3 verification pending. |
+| A15 | Publication now blocks unresolved capabilities and builder supports explicit source/declaration removal; broader custom capability/version reconciliation and DB verification pending. |
+| A16 | Safe traversal, bounded portable JSON, format rejection, reference integrity and RE2 implemented/tested; broader HTTP adversarial/oversized-input matrix pending. |
+| A18 | Durable erasure retry queue and pending-upload TTL controls implemented; DB failure recovery, record-age retention controls and shared-reference lifecycle pending. |
+| A19 | Runnable isolated 0001-to-0002 data-preserving upgrade test added; DB execution and migration-failure coverage pending. |
+| A21 | Automated desktop/narrow checks now exist and pass for basic surfaces; rich dialogs, custom themes, expanded manual keyboard/assistive-technology checks and human review pending. |
+
+No release/publication/license readiness is claimed. TrackForge and shared-library
+repositories were not changed. See `docs/ui-integration.md` and
+`docs/trackforge-integration.md` for current APIs, setup and limits.
+
+## Historical outcome summary
 
 Implemented an end-to-end working tranche with:
 

@@ -589,7 +589,7 @@ export class FormRepository {
         input.ctx.tenantId,
         input.ctx.actorId,
         uploadId,
-        JSON.stringify({ formId: input.formId, fileName: input.fileName, sizeBytes: input.sizeBytes })
+        JSON.stringify({ formId: input.formId, sizeBytes: input.sizeBytes })
       ]
     );
 
@@ -663,16 +663,62 @@ export class FormRepository {
     );
   }
 
+  async saveBinding(ctx: DbContext, scope: { type: string; id: string }, input: { formId: string; mode: "latest" | "pinned"; definitionId?: string; expectedRevision: number }): Promise<{ revision: number }> {
+    const definition = input.mode === "pinned"
+      ? await this.getPublishedDefinitionById(ctx, input.definitionId ?? "")
+      : (await this.pool.query(`SELECT pd.id, pd.form_id AS "formId" FROM published_definitions pd JOIN forms f ON f.id = pd.form_id WHERE f.tenant_id = $1 AND f.id = $2 ORDER BY pd.publication_version DESC LIMIT 1`, [ctx.tenantId, input.formId])).rows[0];
+    if (!definition || definition.formId !== input.formId) throw new Error("DEFINITION_NOT_FOUND");
+    const parameters = [ctx.tenantId, scope.type, scope.id, input.formId, JSON.stringify({ mode: input.mode }), definition.id, ctx.actorId];
+    const result = input.expectedRevision === 0
+      ? await this.pool.query(`INSERT INTO form_bindings (id,tenant_id,scope_type,scope_id,form_id,policy_json,resolved_definition_id,updated_by) VALUES ($8,$1,$2,$3,$4,$5::jsonb,$6,$7) ON CONFLICT (tenant_id,scope_type,scope_id) DO NOTHING RETURNING revision`, [...parameters, createStableId("binding")])
+      : await this.pool.query(`UPDATE form_bindings SET form_id=$4,policy_json=$5::jsonb,resolved_definition_id=$6,updated_by=$7,updated_at=NOW(),revision=revision+1 WHERE tenant_id=$1 AND scope_type=$2 AND scope_id=$3 AND revision=$8 RETURNING revision`, [...parameters, input.expectedRevision]);
+    if (!result.rowCount) throw new Error("BINDING_CONFLICT");
+    return { revision: Number(result.rows[0].revision) };
+  }
+  async resetBinding(ctx: DbContext, scope: { type: string; id: string }, expectedRevision: number): Promise<void> {
+    const result = await this.pool.query("DELETE FROM form_bindings WHERE tenant_id=$1 AND scope_type=$2 AND scope_id=$3 AND revision=$4 RETURNING id", [ctx.tenantId,scope.type,scope.id,expectedRevision]);
+    if (!result.rowCount) throw new Error("BINDING_CONFLICT");
+  }
+  async resolveBinding(ctx: DbContext, ancestors: Array<{ type: string; id: string }>): Promise<{ source: {type:string;id:string}; revision: number; mode: "latest" | "pinned"; definitionId: string; formId: string } | null> {
+    for (const scope of [...ancestors].reverse()) {
+      const result = await this.pool.query("SELECT revision,policy_json,resolved_definition_id,form_id FROM form_bindings WHERE tenant_id=$1 AND scope_type=$2 AND scope_id=$3", [ctx.tenantId,scope.type,scope.id]);
+      const binding = result.rows[0];
+      if (!binding) continue;
+      const mode = binding.policy_json.mode as "latest" | "pinned";
+      let definitionId = String(binding.resolved_definition_id);
+      if (mode === "latest") {
+        const latest = await this.pool.query("SELECT id FROM published_definitions WHERE form_id=$1 ORDER BY publication_version DESC LIMIT 1", [binding.form_id]);
+        definitionId = latest.rows[0]?.id ?? definitionId;
+      }
+      return { source:scope, revision:Number(binding.revision), mode, definitionId, formId:String(binding.form_id) };
+    }
+    return null;
+  }
+
+  async listStorageDeletions(ctx: DbContext): Promise<string[]> {
+    const rows = await this.pool.query("SELECT object_key FROM storage_deletions WHERE tenant_id = $1 ORDER BY created_at LIMIT 100", [ctx.tenantId]);
+    return rows.rows.map(row => String(row.object_key));
+  }
+  async acknowledgeStorageDeletion(ctx: DbContext, objectKey: string): Promise<void> {
+    await this.pool.query("DELETE FROM storage_deletions WHERE tenant_id = $1 AND object_key = $2", [ctx.tenantId, objectKey]);
+  }
+  async listExpiredUploads(ctx: DbContext, maxAgeMs: number): Promise<Array<{ id: string; objectKey: string }>> {
+    const rows = await this.pool.query(`SELECT id, object_key FROM uploads WHERE tenant_id = $1 AND attached_revision_id IS NULL
+      AND (status = 'deletion_pending' OR created_at < NOW() - ($2 * INTERVAL '1 millisecond')) ORDER BY created_at LIMIT 100`, [ctx.tenantId, maxAgeMs]);
+    return rows.rows.map(row => ({ id: String(row.id), objectKey: String(row.object_key) }));
+  }
+
   async listRecordRevisions(ctx: DbContext, recordId: string): Promise<Array<{
     id: string;
     revisionNumber: number;
     definitionId: string;
     values: Record<string, unknown>;
+    selectedLabels: Record<string, string>;
     createdAt: string;
   }>> {
     const result = await this.pool.query(
       `
-      SELECT rr.id, rr.revision_number, rr.definition_id, rr.values_json, rr.created_at
+      SELECT rr.id, rr.revision_number, rr.definition_id, rr.values_json, rr.selected_labels_json, rr.created_at
       FROM record_revisions rr
       JOIN records r ON r.id = rr.record_id
       WHERE rr.record_id = $1
@@ -687,6 +733,7 @@ export class FormRepository {
       revisionNumber: Number(row.revision_number),
       definitionId: row.definition_id,
       values: row.values_json as Record<string, unknown>,
+      selectedLabels: row.selected_labels_json as Record<string, string>,
       createdAt: row.created_at.toISOString()
     }));
   }
@@ -739,6 +786,10 @@ export class FormRepository {
       `,
         [recordId, ctx.tenantId]
       );
+
+      for (const upload of uploads.rows) {
+        await client.query("INSERT INTO storage_deletions (tenant_id, object_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [ctx.tenantId, upload.object_key]);
+      }
 
       await client.query(
         `

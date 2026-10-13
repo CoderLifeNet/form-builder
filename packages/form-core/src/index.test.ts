@@ -83,3 +83,14 @@ describe("evaluateRule", () => {
     expect(evaluateRule(["x", "y"], "includes_option", "y")).toBe(true);
   });
 });
+
+describe("portable definition hardening and tracking", () => {
+  const definition = {metadata:{formId:"form",name:"Form"}, sections:[{id:"section",title:"Details",order:0}],fields:[],tracking:{id:"tracking",events:[]}};
+  it("preserves explicit empty event allowlists",()=>{expect(validateDefinition(definition).tracking?.events).toEqual([]);});
+  it("rejects unsupported event names",()=>{expect(()=>validateDefinition({...definition,tracking:{id:"tracking",events:["made-up"]}})).toThrow();});
+  it("rejects polluting keys and excessive nesting before normalization",()=>{
+    expect(()=>validateDefinition(JSON.parse('{"__proto__":{"polluted":true}}'))).toThrow(/UNSAFE/);
+    let nested: any={}; for(let i=0;i<40;i++) nested={child:nested};
+    expect(()=>validateDefinition(nested)).toThrow(/LIMIT/);
+  });
+});

@@ -95,6 +95,7 @@ integration("form server acceptance integration", () => {
       repository: repo,
       policyAdapter: makePolicyAdapter(),
       sourceRegistry: {
+        async capabilities() { return { "profile.first_name": "1" }; },
         async resolveSourceValue(sourceId) {
           if (sourceId === "profile.first_name") {
             return "Owner";

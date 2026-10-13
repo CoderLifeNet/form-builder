@@ -36,5 +36,10 @@
     "supertest": "7.1.4",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
-  }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md"
+  ]
 }

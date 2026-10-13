@@ -1,0 +1,2 @@
+import { defineConfig } from "@playwright/test";
+export default defineConfig({ testDir:"tests/browser", use:{baseURL:"http://127.0.0.1:5100"}, webServer:{command:"npx vite fixtures/ui-review --host 127.0.0.1 --port 5100",url:"http://127.0.0.1:5100",reuseExistingServer:false}, projects:[{name:"desktop",use:{viewport:{width:1440,height:1000}}},{name:"narrow",use:{viewport:{width:390,height:844}}}] });

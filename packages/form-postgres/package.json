@@ -27,5 +27,10 @@
     "@types/pg": "8.15.5",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
-  }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md"
+  ]
 }

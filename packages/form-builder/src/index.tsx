@@ -1,5 +1,6 @@
-import { DragEvent, ReactElement, useEffect, useMemo, useState } from "react";
-import { createStableId, FormDefinition, validateDefinition } from "@coderlifenet/form-core";
+import { TrackingEditor, AccessibilityEditor } from "./settings.js";
+import { DragEvent, ReactElement, useEffect, useMemo, useState, useRef } from "react";
+import { copyDefinition, parsePortableJson, createStableId, FormDefinition, validateDefinition } from "@coderlifenet/form-core";
 import {
   Box,
   Button,
@@ -29,7 +30,7 @@ export type ManagedForm = {
   definition: FormDefinition;
 };
 
-type BuilderTab = "basic" | "data" | "rules" | "layout";
+type BuilderTab = "basic" | "data" | "rules" | "layout" | "settings";
 type SaveState = "saved" | "saving" | "publishing" | "unsaved" | "error";
 type Field = FormDefinition["fields"][number];
 
@@ -164,15 +165,29 @@ export function FormBuilder(props: {
   initialDefinition: FormDefinition;
   onSaveDraft: (definition: FormDefinition) => Promise<void> | void;
   onPublish: (definition: FormDefinition) => Promise<void> | void;
+  onSaved?: () => void;
+  onReloadDraft?: () => Promise<FormDefinition>;
+  autosaveDelay?: number | false;
+  sourceCapabilities?: Record<string, string>;
+  onDefinitionChange?: (definition: FormDefinition) => void;
 }): ReactElement {
   const [definition, setDefinition] = useState<FormDefinition>(props.initialDefinition);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(props.initialDefinition.fields[0]?.id ?? null);
   const [activeTab, setActiveTab] = useState<BuilderTab>("basic");
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveMessage, setSaveMessage] = useState("");
+  const latest = useRef(definition);
+  latest.current = definition;
+  const callbacks = useRef(props);
+  callbacks.current = props;
+  const savedSnapshot = useRef(JSON.stringify(props.initialDefinition));
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const formId = useRef(definition.metadata.formId);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
 
   useEffect(() => {
+    formId.current = props.initialDefinition.metadata.formId;
+    savedSnapshot.current = JSON.stringify(props.initialDefinition);
     setDefinition(props.initialDefinition);
     setSelectedFieldId(props.initialDefinition.fields[0]?.id ?? null);
     setSaveState("saved");
@@ -273,6 +288,7 @@ export function FormBuilder(props: {
         .map((field, index) => ({
           ...field,
           row: index,
+          source: field.source ? { ...field.source, dependsOn: field.source.dependsOn?.filter(id => id !== fieldId) } : undefined,
           rules: field.rules.filter((rule) => rule.sourceFieldId !== fieldId)
         }));
       return { ...prev, fields: filteredFields };
@@ -371,42 +387,66 @@ export function FormBuilder(props: {
     setDraggingFieldId(null);
   };
 
-  const saveDraft = async (): Promise<void> => {
-    setSaveState("saving");
-    setSaveMessage("");
-
-    try {
-      await props.onSaveDraft(definition);
-      setSaveState("saved");
-      setSaveMessage("Draft saved");
-    } catch (error) {
-      setSaveState("error");
-      setSaveMessage(error instanceof Error ? error.message : "Could not save draft. Your edits are still present.");
-    }
+  const persist = (publish: boolean, manual: boolean): Promise<void> => {
+    const requestedForm = formId.current;
+    const operation = queue.current.catch(() => undefined).then(async () => {
+      if (requestedForm !== formId.current) return;
+      const snapshot = latest.current;
+      const serialized = JSON.stringify(snapshot);
+      setSaveState(publish ? "publishing" : "saving");
+      try {
+        if (publish) await callbacks.current.onPublish(snapshot);
+        else if (serialized !== savedSnapshot.current || manual) await callbacks.current.onSaveDraft(snapshot);
+        if (requestedForm !== formId.current) return;
+        savedSnapshot.current = serialized;
+        const current = JSON.stringify(latest.current) === serialized;
+        setSaveState(current ? "saved" : "unsaved");
+        setSaveMessage(publish ? "Published successfully" : "Draft saved");
+        if (manual && current) callbacks.current.onSaved?.();
+      } catch (error) {
+        if (requestedForm !== formId.current) return;
+        setSaveState("error");
+        setSaveMessage(error instanceof Error ? error.message : "Save failed. Your edits remain available.");
+      }
+    });
+    queue.current = operation;
+    return operation;
   };
-
-  const publishDraft = async (): Promise<void> => {
-    setSaveState("publishing");
-    setSaveMessage("");
-
-    try {
-      await props.onPublish(definition);
-      setSaveState("saved");
-      setSaveMessage("Published successfully");
-    } catch (error) {
-      setSaveState("error");
-      setSaveMessage(error instanceof Error ? error.message : "Publish failed. Your edits are still present.");
-    }
-  };
+  const saveDraft = () => persist(false, true);
+  const publishDraft = () => persist(true, false);
+  useEffect(() => {
+    callbacks.current.onDefinitionChange?.(definition);
+    if (JSON.stringify(definition) === savedSnapshot.current || props.autosaveDelay === false) return;
+    const timer = setTimeout(() => void persist(false, false), props.autosaveDelay ?? 1000);
+    return () => clearTimeout(timer);
+  }, [definition, props.autosaveDelay]);
+  useEffect(() => {
+    const warn = (event: BeforeUnloadEvent) => {
+      if (JSON.stringify(latest.current) !== savedSnapshot.current) { event.preventDefault(); event.returnValue = ""; }
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, []);
 
   return (
     <Box component="section" aria-label="Form builder">
-      <Stack direction="row" spacing={1.5} sx={{ justifyContent: "space-between", alignItems: "center" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ justifyContent: "space-between", alignItems: "center" }}>
         <Typography variant="h5" component="h2">Builder</Typography>
-        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
-          <Typography variant="body2" color={saveState === "error" ? "error" : "text.secondary"}>
+        <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
+          <Typography role="status" aria-live="polite" variant="body2" color={saveState === "error" ? "error" : "text.secondary"}>
             Status: {saveState}{saveMessage ? ` - ${saveMessage}` : ""}
           </Typography>
+          {saveState === "error" && props.onReloadDraft && <Button onClick={async () => {
+            if (!window.confirm("Load the current saved draft and discard your local edits?")) return;
+            try {
+              const current = await props.onReloadDraft!();
+              savedSnapshot.current = JSON.stringify(current);
+              latest.current = current;
+              setDefinition(current);
+              setSaveState("saved");
+              setSaveMessage("Saved draft loaded");
+            } catch { setSaveMessage("Could not reload. Your local edits remain available."); }
+          }}>Reload saved draft</Button>}
           <Button type="button" variant="outlined" disabled={saveState === "saving" || saveState === "publishing"} onClick={() => void saveDraft()}>
             Save draft
           </Button>
@@ -415,7 +455,17 @@ export function FormBuilder(props: {
           </Button>
         </Stack>
       </Stack>
-      <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: "220px 1fr 360px", gap: 1.5 }}>
+      <Box component="details" sx={{ mt: 2 }}>
+        <Box component="summary">Form tracking and accessibility</Box>
+        <Stack spacing={2} sx={{ p: 2 }}>
+          <TrackingEditor form value={definition.tracking} onChange={tracking => updateDefinition(prev => ({ ...prev, tracking }))} />
+          <Typography variant="subtitle2">Capability dependencies</Typography>
+          {Object.entries(definition.dependencyVersions).map(([id, version]) => <Stack key={id} direction="row" spacing={1}><Typography>{id} ({version}){props.sourceCapabilities?.[id] === version ? "" : " — unavailable or incompatible"}</Typography><Button disabled={definition.fields.some(field => field.source?.id === id)} onClick={() => updateDefinition(previous => { const dependencyVersions = { ...previous.dependencyVersions }; delete dependencyVersions[id]; return { ...previous, dependencyVersions }; })}>Remove declaration</Button></Stack>)}
+          <Typography variant="caption">Reconnect or remove field sources in Data settings. Publication remains blocked while dependencies are unresolved.</Typography>
+          <AccessibilityEditor value={definition.accessibility} onChange={accessibility => updateDefinition(prev => ({ ...prev, accessibility }))} />
+        </Stack>
+      </Box>
+      <Box sx={{ mt: 2, display: "grid", gridTemplateColumns: { xs: "minmax(0,1fr)", md: "180px minmax(0,1fr) 320px" }, gap: 1.5 }}>
         <Paper component="aside" variant="outlined" sx={{ p: 1.5 }}>
           <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center" }}>
             <Typography variant="h6">Palette</Typography>
@@ -492,7 +542,7 @@ export function FormBuilder(props: {
                     {field.label}
                     {field.required ? " *" : ""}
                   </Typography>
-                  <Typography variant="caption" color="inherit" sx={{ opacity: 0.85, display: "block" }}>
+                  <Typography variant="caption" color="inherit" sx={{ display: "block" }}>
                     {previewByType(field)}
                   </Typography>
                 </Box>
@@ -517,8 +567,8 @@ export function FormBuilder(props: {
             <Typography variant="body2" color="text.secondary">Select a field to edit configuration.</Typography>
           ) : (
             <>
-              <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-                {(["basic", "data", "rules", "layout"] as BuilderTab[]).map((tab) => (
+              <Stack direction="row" spacing={1} useFlexGap sx={{ mb: 1, flexWrap: "wrap" }}>
+                {(["basic", "data", "rules", "layout", "settings"] as BuilderTab[]).map((tab) => (
                   <Button
                     key={tab}
                     type="button"
@@ -531,8 +581,17 @@ export function FormBuilder(props: {
                 ))}
               </Stack>
 
+              {activeTab === "settings" ? <Stack spacing={2}>
+                <TrackingEditor key={selectedField.id} value={selectedField.tracking} onChange={tracking => updateSelectedField(field => ({ ...field, tracking }))} />
+                <AccessibilityEditor value={selectedField.accessibility} onChange={accessibility => updateSelectedField(field => ({ ...field, accessibility }))} />
+              </Stack> : null}
               {activeTab === "basic" ? (
                 <Stack spacing={1.25}>
+                  {(selectedField.type === "single_file" || selectedField.type === "multi_file") && <Stack spacing={1}>
+                    <TextField label="Maximum bytes per file" type="number" value={selectedField.uploadPolicy?.maxBytes ?? 20971520} onChange={e => updateSelectedField(field => ({ ...field, uploadPolicy: { ...field.uploadPolicy, maxBytes: Number(e.target.value) } }))} />
+                    <TextField label="Maximum files" type="number" value={selectedField.uploadPolicy?.maxFiles ?? (selectedField.type === "single_file" ? 1 : 100)} onChange={e => updateSelectedField(field => ({ ...field, uploadPolicy: { ...field.uploadPolicy, maxFiles: Number(e.target.value) } }))} />
+                    <TextField label="Allowed media types (comma separated)" value={selectedField.uploadPolicy?.mediaTypes?.join(",") ?? ""} onChange={e => updateSelectedField(field => ({ ...field, uploadPolicy: { ...field.uploadPolicy, mediaTypes: e.target.value.split(",").map(type => type.trim()).filter(Boolean) } }))} />
+                  </Stack>}
                   <TextField label="Label" value={selectedField.label} onChange={(event) => updateSelectedField((field) => ({ ...field, label: event.target.value }))} />
                   <TextField
                     label="Visible help text"
@@ -558,6 +617,10 @@ export function FormBuilder(props: {
 
               {activeTab === "data" ? (
                 <Stack spacing={1.25}>
+                  {selectedField.source && <>
+                    <TextField select label="Source purpose" value={selectedField.source.kind ?? "value"} slotProps={{ select: { native: true } }} onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, kind: e.target.value as "value" | "options" } }))}><option value="value">Value</option><option value="options">Options</option></TextField>
+                    <TextField label="Source dependency field IDs (comma separated)" value={selectedField.source.dependsOn?.join(",") ?? ""} onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, dependsOn: e.target.value.split(",").map(id => id.trim()).filter(Boolean) } }))} />
+                  </>}
                   <TextField
                     label="Default value"
                     value={toEditableDefaultValue(selectedField.defaultValue)}
@@ -576,7 +639,7 @@ export function FormBuilder(props: {
                           source: nextId
                             ? {
                                 id: nextId,
-                                version: "1",
+                                version: props.sourceCapabilities?.[nextId] ?? field.source?.version ?? "1",
                                 mode: field.source?.mode ?? "display_only"
                               }
                             : undefined
@@ -584,8 +647,8 @@ export function FormBuilder(props: {
                       }}
                     >
                       <MenuItem value="">Manual entry</MenuItem>
-                      <MenuItem value="profile.first_name">Profile first name</MenuItem>
-                      <MenuItem value="profile.last_name">Profile last name</MenuItem>
+                      {selectedField.source && !props.sourceCapabilities?.[selectedField.source.id] && <MenuItem value={selectedField.source.id}>{selectedField.source.id} (unavailable)</MenuItem>}
+                      {Object.entries(props.sourceCapabilities ?? {}).map(([id, version]) => <MenuItem key={id} value={id}>{id} ({version})</MenuItem>)}
                     </Select>
                   </FormControl>
 
@@ -834,7 +897,8 @@ export function exportDefinition(definition: FormDefinition): string {
 }
 
 export function importDefinition(json: string): FormDefinition {
-  const parsed = JSON.parse(json) as { definition: FormDefinition; dependencies?: Record<string, string> };
+  const parsed = parsePortableJson(json) as { definition: FormDefinition; dependencies?: Record<string, string> };
+  if ((parsed as { formatVersion?: number }).formatVersion !== 1) throw new Error("UNSUPPORTED_IMPORT_VERSION");
   const validated = validateDefinition(parsed.definition);
   return remapDefinitionStableIds({
     ...validated,
@@ -843,44 +907,7 @@ export function importDefinition(json: string): FormDefinition {
 }
 
 function remapDefinitionStableIds(definition: FormDefinition): FormDefinition {
-  const sectionIdMap = new Map<string, string>();
-  const fieldIdMap = new Map<string, string>();
-
-  const sections = definition.sections.map((section) => {
-    const id = createStableId("section");
-    sectionIdMap.set(section.id, id);
-    return { ...section, id };
-  });
-
-  for (const field of definition.fields) {
-    fieldIdMap.set(field.id, createStableId("field"));
-  }
-
-  const fields = definition.fields.map((field) => {
-    const nextId = fieldIdMap.get(field.id) ?? field.id;
-    const options = field.options?.map((option) => ({ ...option, id: createStableId("option") }));
-    return {
-      ...field,
-      id: nextId,
-      key: nextId,
-      sectionId: sectionIdMap.get(field.sectionId) ?? field.sectionId,
-      options,
-      rules: field.rules.map((rule) => ({
-        ...rule,
-        sourceFieldId: fieldIdMap.get(rule.sourceFieldId) ?? rule.sourceFieldId
-      }))
-    };
-  });
-
-  return {
-    ...definition,
-    sections,
-    fields,
-    metadata: {
-      ...definition.metadata,
-      formId: createStableId("imported")
-    }
-  };
+  return copyDefinition(definition);
 }
 
 function defaultLabelByType(type: Field["type"]): string {

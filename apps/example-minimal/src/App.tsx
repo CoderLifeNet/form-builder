@@ -1,12 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, type ReactElement } from "react";
 import { FormBuilder } from "@coderlifenet/form-builder";
-import { FormRenderer } from "@coderlifenet/form-react";
+import { createHttpUploadHandler, FormRenderer } from "@coderlifenet/form-react";
 import type { FormDefinition } from "@coderlifenet/form-core";
 import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
 const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://localhost:4010";
 
-const definition: FormDefinition = {
+const starterDefinition: FormDefinition = {
   metadata: { formId: "demo-min", name: "Minimal service request", schemaVersion: "1.0.0" },
   sections: [
     { id: "sec_a", title: "Your details", order: 0 },
@@ -78,11 +78,15 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-export function App(): JSX.Element {
+export function App(): ReactElement {
+  const [definition, setDefinition] = useState(starterDefinition);
+  const [publishedDefinition, setPublishedDefinition] = useState<FormDefinition | null>(null);
   const [mode, setMode] = useState<"builder" | "renderer">("builder");
   const [useCustomTheme, setUseCustomTheme] = useState(false);
   const [formId, setFormId] = useState<string>("");
   const [draftRevision, setDraftRevision] = useState<number>(1);
+  const revisionRef = useRef(1);
+  revisionRef.current = draftRevision;
   const [definitionId, setDefinitionId] = useState<string>("");
   const [status, setStatus] = useState<string>("Connecting...");
 
@@ -145,18 +149,22 @@ export function App(): JSX.Element {
         </Button>
       </Stack>
       <Paper variant="outlined" sx={{ p: 2 }}>
-        {mode === "builder" ? (
+        <Box hidden={mode !== "builder"}>
           <FormBuilder
             initialDefinition={definition}
+            onReloadDraft={async () => { const draft = await api<{revision:number;definition:FormDefinition}>(`/api/forms/${formId}/draft`); revisionRef.current = draft.revision; setDraftRevision(draft.revision); setDefinition(draft.definition); return draft.definition; }}
+            sourceCapabilities={{ "profile.first_name": "1", "profile.last_name": "1", "request.categories": "1", "request.title_hint": "1" }}
             onSaveDraft={async (nextDefinition) => {
               if (!formId) {
                 throw new Error("Form is not connected yet");
               }
               const saved = await api<{ revision: number }>(`/api/forms/${formId}/draft`, {
                 method: "PUT",
-                body: JSON.stringify({ expectedRevision: draftRevision, definition: nextDefinition })
+                body: JSON.stringify({ expectedRevision: revisionRef.current, definition: nextDefinition })
               });
+              revisionRef.current = saved.revision;
               setDraftRevision(saved.revision);
+              setDefinition(nextDefinition);
               setStatus(`Draft saved r${saved.revision}`);
             }}
             onPublish={async (nextDefinition) => {
@@ -165,21 +173,29 @@ export function App(): JSX.Element {
               }
               const saved = await api<{ revision: number }>(`/api/forms/${formId}/draft`, {
                 method: "PUT",
-                body: JSON.stringify({ expectedRevision: draftRevision, definition: nextDefinition })
+                body: JSON.stringify({ expectedRevision: revisionRef.current, definition: nextDefinition })
               });
+              revisionRef.current = saved.revision;
+              setDraftRevision(saved.revision);
               const published = await api<{ definitionId: string; publicationVersion: number }>(`/api/forms/${formId}/publish`, {
                 method: "POST",
                 body: JSON.stringify({ expectedRevision: saved.revision })
               });
+              revisionRef.current = saved.revision;
               setDraftRevision(saved.revision);
+              setDefinition(nextDefinition);
               setDefinitionId(published.definitionId);
+              setPublishedDefinition(nextDefinition);
               setStatus(`Published v${published.publicationVersion}`);
             }}
           />
-        ) : (
+        </Box>
+        <Box hidden={mode !== "renderer"}>
           <FormRenderer
-            definition={definition}
+            key={definitionId}
+            definition={publishedDefinition ?? definition}
             mode="new"
+            uploadFile={formId && definitionId ? createHttpUploadHandler(apiBase, formId, definitionId) : undefined}
             onSubmit={async (values) => {
               if (!formId || !definitionId) {
                 throw new Error("Publish before submit");
@@ -189,12 +205,12 @@ export function App(): JSX.Element {
                 headers: {
                   "idempotency-key": crypto.randomUUID()
                 },
-                body: JSON.stringify({ formId, definitionId, values })
+                body: JSON.stringify({ formId, definitionId, values, uploadIds: definition.fields.filter(field => field.type === "single_file" || field.type === "multi_file").flatMap(field => Array.isArray(values[field.id]) ? values[field.id] as string[] : values[field.id] ? [String(values[field.id])] : []) })
               });
               setStatus(`Submitted ${result.recordId}`);
             }}
           />
-        )}
+        </Box>
       </Paper>
     </Box>
   );

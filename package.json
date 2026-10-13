@@ -21,6 +21,15 @@
     "dev:infra": "docker compose up -d postgres",
     "dev:infra:down": "docker compose down -v",
     "db:migrate": "npm run db:migrate -w @coderlifenet/form-postgres",
-    "db:seed": "npm run db:seed -w @coderlifenet/form-postgres"
+    "db:seed": "npm run db:seed -w @coderlifenet/form-postgres",
+    "test:browser": "playwright test"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.56.1",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "jsdom": "26.1.0",
+    "vitest": "3.2.4"
   }
 }
