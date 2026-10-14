@@ -26,6 +26,8 @@ export type ManagedForm = {
   name: string;
   description?: string;
   archived: boolean;
+  createdAt?: string;
+  updatedAt?: string;
   publishedVersion?: number;
   hasUnpublishedChanges: boolean;
   definition: FormDefinition;
@@ -55,6 +57,7 @@ export function FormManager(props: {
   onOpenBuilder: (formId: string) => void;
   onCreateForm: () => void;
   onDuplicate: (formId: string) => void;
+  onRename: (formId: string) => void;
   onExport: (formId: string) => void;
   onArchiveToggle: (formId: string) => void;
   onOpenVersionHistory: (formId: string) => void;
@@ -68,7 +71,9 @@ export function FormManager(props: {
   const rows = useMemo(() => {
     return props.forms.filter((form) => {
       const nameMatch = form.name.toLowerCase().includes(query.toLowerCase());
-      if (!nameMatch) {
+      const descriptionMatch = (form.description ?? "").toLowerCase().includes(query.toLowerCase());
+      const idMatch = form.id.toLowerCase().includes(query.toLowerCase());
+      if (!nameMatch && !descriptionMatch && !idMatch) {
         return false;
       }
       if (status === "draft") {
@@ -137,6 +142,10 @@ export function FormManager(props: {
                 {form.name}
               </Button>
               {form.description ? <Typography variant="body2" color="text.secondary">{form.description}</Typography> : null}
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25 }}>
+                Form ID: {form.id}
+                {form.updatedAt ? ` | Updated ${formatFormDate(form.updatedAt)}` : ""}
+              </Typography>
             </Box>
             <Chip
               size="small"
@@ -162,6 +171,11 @@ export function FormManager(props: {
               <Tooltip title="Duplicate">
                 <IconButton aria-label="Duplicate" type="button" size="small" onClick={() => props.onDuplicate(form.id)}>
                   ⧉
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Rename">
+                <IconButton aria-label="Rename" type="button" size="small" onClick={() => props.onRename(form.id)}>
+                  ✎
                 </IconButton>
               </Tooltip>
               <Tooltip title="Export">
@@ -195,6 +209,20 @@ export function FormManager(props: {
       </Box>
     </Box>
   );
+}
+
+function formatFormDate(value: string): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(parsed);
 }
 
 export function FormBuilder(props: {

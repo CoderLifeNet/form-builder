@@ -113,6 +113,16 @@ type ApiFormSummary = {
 
 const minimalDemoDescription = "Minimal example form (local demo)";
 
+function formatNameTimestamp(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
 export function App(): ReactElement {
   const submissionKey = useRef(createMutationRetryKey());
   const [definition, setDefinition] = useState(starterDefinition);
@@ -162,7 +172,7 @@ export function App(): ReactElement {
         const created = await api<{ formId: string; draftRevision: number }>("/api/forms", {
           method: "POST",
           body: JSON.stringify({
-            name: `Minimal ${new Date().toISOString()} ${uniqueSuffix}`,
+            name: `Minimal ${formatNameTimestamp(new Date())} ${uniqueSuffix}`,
             description: minimalDemoDescription,
             definition
           })

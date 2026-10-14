@@ -68,6 +68,10 @@ const draftLifecycleMutationSchema = z.object({
   expectedRevision: z.number().int().positive()
 });
 
+const renameFormSchema = z.object({
+  name: z.string().min(1)
+});
+
 const saveRecordSchema = z.object({
   formId: z.string().min(1),
   definitionId: z.string().min(1),
@@ -522,6 +526,23 @@ export function createFormServer(options?: {
       await requireCapability(policyAdapter, ctx, "forms.archive", { formId: req.params.formId });
       await repository.archiveForm({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId, false);
       res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/forms/:formId", async (req, res, next) => {
+    try {
+      const ctx = await policyAdapter.resolveContext(req);
+      await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
+      const payload = renameFormSchema.parse(req.body);
+      await repository.renameForm({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId, payload.name);
+      const form = await repository.getFormById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
+      if (!form) {
+        res.status(404).json(errorEnvelope("FORM_NOT_FOUND", "Form not found."));
+        return;
+      }
+      res.status(200).json(form);
     } catch (error) {
       next(error);
     }
@@ -1150,6 +1171,10 @@ export function createFormServer(options?: {
           ? "The record changed since you loaded it. Reload and retry with the latest revision."
           : "The draft or binding changed. Review the current version before retrying.";
         res.status(409).json(errorEnvelope(error.message, message));
+        return;
+      }
+      if (error.message === "FORM_NAME_CONFLICT") {
+        res.status(409).json(errorEnvelope("FORM_NAME_CONFLICT", "A form with this name already exists in the current tenant."));
         return;
       }
       if (error.message === "NO_UNPUBLISHED_CHANGES") {

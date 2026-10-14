@@ -91,6 +91,8 @@ export class FormRepository {
     name: string;
     description: string | null;
     archived: boolean;
+    createdAt: string;
+    updatedAt: string;
     draftRevision: number | null;
     publishedVersion: number | null;
     publishedDefinitionId: string | null;
@@ -105,6 +107,8 @@ export class FormRepository {
         f.name,
         f.description,
         f.archived,
+        f.created_at,
+        f.updated_at,
         d.revision AS draft_revision,
         pd.publication_version AS published_version,
         pd.id AS published_definition_id,
@@ -133,6 +137,8 @@ export class FormRepository {
       name: row.name,
       description: row.description,
       archived: Boolean(row.archived),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
       draftRevision: row.draft_revision === null ? null : Number(row.draft_revision),
       publishedVersion: row.published_version === null ? null : Number(row.published_version),
       publishedDefinitionId: row.published_definition_id,
@@ -152,6 +158,8 @@ export class FormRepository {
     name: string;
     description: string | null;
     archived: boolean;
+    createdAt: string;
+    updatedAt: string;
     draftRevision: number | null;
     publishedVersion: number | null;
     publishedDefinitionId: string | null;
@@ -165,6 +173,8 @@ export class FormRepository {
         f.name,
         f.description,
         f.archived,
+        f.created_at,
+        f.updated_at,
         d.revision AS draft_revision,
         pd.publication_version AS published_version,
         pd.id AS published_definition_id,
@@ -198,6 +208,8 @@ export class FormRepository {
       name: row.name,
       description: row.description,
       archived: Boolean(row.archived),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
       draftRevision: row.draft_revision === null ? null : Number(row.draft_revision),
       publishedVersion: row.published_version === null ? null : Number(row.published_version),
       publishedDefinitionId: row.published_definition_id,
@@ -547,6 +559,57 @@ export class FormRepository {
     if (!result.rowCount) {
       throw new Error("DRAFT_CONFLICT");
     }
+  }
+
+  async renameForm(
+    ctx: DbContext,
+    formId: string,
+    name: string
+  ): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new Error("FORM_NAME_REQUIRED");
+    }
+
+    const result = await this.pool.query(
+      `
+      UPDATE forms f
+      SET name = $3,
+          updated_at = NOW()
+      WHERE f.tenant_id = $1
+        AND f.id = $2
+        AND NOT EXISTS (
+          SELECT 1
+          FROM forms other
+          WHERE other.tenant_id = $1
+            AND other.name = $3
+            AND other.id <> $2
+        )
+      RETURNING f.id
+      `,
+      [ctx.tenantId, formId, trimmed]
+    );
+
+    if (result.rowCount) {
+      return;
+    }
+
+    const form = await this.pool.query(
+      `
+      SELECT id
+      FROM forms
+      WHERE tenant_id = $1
+        AND id = $2
+      LIMIT 1
+      `,
+      [ctx.tenantId, formId]
+    );
+
+    if (!form.rowCount) {
+      throw new Error("FORM_NOT_FOUND");
+    }
+
+    throw new Error("FORM_NAME_CONFLICT");
   }
 
   async withIdempotency(

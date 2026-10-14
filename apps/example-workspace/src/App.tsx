@@ -11,6 +11,8 @@ type ApiForm = {
   name: string;
   description: string | null;
   archived: boolean;
+  createdAt: string;
+  updatedAt: string;
   draftRevision: number | null;
   publishedVersion: number | null;
   publishedDefinitionId: string | null;
@@ -183,6 +185,16 @@ const starterDefinition: FormDefinition = {
 
 const api = createFormApiClient({ baseUrl: apiBase });
 
+function formatNameTimestamp(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
 export function App(): ReactElement {
   const submissionKey = useRef(createMutationRetryKey());
   const [sourceCapabilities, setSourceCapabilities] = useState<Record<string, string>>({});
@@ -226,6 +238,8 @@ export function App(): ReactElement {
         name: form.name,
         description: form.description ?? undefined,
         archived: form.archived,
+        createdAt: form.createdAt,
+        updatedAt: form.updatedAt,
         publishedVersion: form.publishedVersion ?? undefined,
         hasUnpublishedChanges: form.hasUnpublishedChanges,
         definition: activeDraft?.definition ?? starterDefinition
@@ -435,7 +449,7 @@ export function App(): ReactElement {
     const created = await api<{ formId: string }>("/api/forms", {
       method: "POST",
       body: JSON.stringify({
-        name: `Form ${new Date().toISOString()}`,
+        name: `Form ${formatNameTimestamp(new Date())}`,
         description: "Created from workspace example",
         definition: starterDefinition
       })
@@ -565,6 +579,25 @@ export function App(): ReactElement {
                   await refreshForms();
                   await openBuilder(duplicated.formId);
                   setStatus("Independent draft copy opened");
+                })();
+              }}
+              onRename={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  if (!target) {
+                    return;
+                  }
+                  const requestedName = window.prompt("Rename form", target.name);
+                  const trimmed = requestedName?.trim();
+                  if (!trimmed || trimmed === target.name) {
+                    return;
+                  }
+                  await api(`/api/forms/${formId}`, {
+                    method: "PATCH",
+                    body: JSON.stringify({ name: trimmed })
+                  });
+                  await refreshForms();
+                  setStatus("Form renamed");
                 })();
               }}
               onExport={(formId) => {

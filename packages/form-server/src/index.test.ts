@@ -55,12 +55,15 @@ function makeRepositoryStub() {
       name: "Form",
       description: null,
       archived: false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
       draftRevision: 1,
       publishedVersion: 1,
       publishedDefinitionId: "d1",
       hasUnpublishedChanges: false,
       lifecycleState: "published_clean"
     }),
+    renameForm: async () => undefined,
     getPublishedDefinitionById: async () => ({ id: "d1", formId: "f1", publicationVersion: 1, definition }),
     createUpload: async () => ({ id: "up_db_1", uploadId: "upload_1" }),
     getUploadById: async () => ({
@@ -146,6 +149,39 @@ describe("form server", () => {
 
     expect(response.status).toBe(400);
     expect(response.body.code).toBe("EXPECTED_REVISION_REQUIRED");
+  });
+
+  it("renames forms for authorized designers", async () => {
+    let renamedTo = "";
+    const app = createFormServer({
+      repository: {
+        ...makeRepositoryStub(),
+        renameForm: async (_ctx: unknown, _formId: string, name: string) => {
+          renamedTo = name;
+        },
+        getFormById: async () => ({
+          id: "f1",
+          name: renamedTo || "Form",
+          description: null,
+          archived: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          draftRevision: 1,
+          publishedVersion: 1,
+          publishedDefinitionId: "d1",
+          hasUnpublishedChanges: false,
+          lifecycleState: "published_clean" as const
+        })
+      } as any,
+      policyAdapter: allowCapabilities(["forms.design"])
+    });
+
+    const response = await request(app)
+      .patch("/api/forms/f1")
+      .send({ name: "Renamed form" });
+
+    expect(response.status).toBe(200);
+    expect(response.body.name).toBe("Renamed form");
   });
 
   it("stores upload through adapter", async () => {
