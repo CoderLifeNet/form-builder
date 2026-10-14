@@ -67,7 +67,7 @@ test("builder keyboard operations activate controls, restore focus from popup, a
  const dataTab=page.getByRole("button",{name:"Data source",exact:true});
  await dataTab.focus();
  await page.keyboard.press("Enter");
- const sourceSelect=page.getByRole("combobox",{name:"Fill from host source",exact:true});
+ const sourceSelect=page.getByRole("combobox",{name:"Prefill from host data",exact:true});
  await sourceSelect.focus();
  await expect(sourceSelect).toBeFocused();
  await page.keyboard.press("Space");

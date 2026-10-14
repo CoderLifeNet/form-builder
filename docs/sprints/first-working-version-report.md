@@ -4,6 +4,62 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: hands-on UX findings follow-up (2026-10-13)
+
+Branch: `feat/ui-0.2-integration`.
+
+This follow-up addressed new hands-on review feedback before publication planning. Scope remained within existing functionality and contracts.
+
+Delivered changes:
+
+- **Drag artifact root-cause fix in reusable builder**
+  - Diagnosed that custom drag-image cleanup happened too early (`queueMicrotask` in drag start), which can let Chromium fall back to browser-native drag visuals.
+  - Updated drag flow to:
+    - set explicit drag payload (`application/x-coderlifenet-form-field` + `text/plain`),
+    - keep the custom single-field drag image mounted for drag lifetime,
+    - clean up only on drag end,
+    - keep existing drop indicator, cancellation behavior, and keyboard reordering.
+- **Explicit Radio buttons field type**
+  - Added `radio` to shared schema and validation flow (`form-core`, `form-server`, `form-react`, `form-builder`).
+  - Added separate palette entries for `Dropdown` and `Radio buttons`.
+  - Reused existing single-choice options/default contract (same option ID/value model as `single_select`).
+  - Added renderer support for capture/edit/read-only flows with proper grouped labeling.
+- **Plain-language pass continuation**
+  - Reworded user-facing builder/help text to reduce implementation-heavy phrasing in routine authoring flows.
+  - Clarified host-data configuration labels and effects in Data source settings.
+  - Replaced remaining end-user "immutable" phrasing in normal app flows with concrete behavior language.
+- **Example setup documentation correction**
+  - Updated both example READMEs to:
+    - build before running compiled migrations,
+    - show explicit backend `FORM_DB_URL` and `FORM_DEV_AUTH=true`,
+    - use separate backend/frontend terminals,
+    - list expected local URLs,
+    - explain restart after package changes,
+    - avoid unnecessary reseed/reset guidance.
+
+Validation evidence for this follow-up:
+
+| Command | Result |
+| --- | --- |
+| `npm run build` | PASS across package builds + both example app builds. |
+| `npm run typecheck` | PASS across all workspaces and examples. |
+| `npm test` | PASS with exact counts: `@coderlifenet/form-builder` 3 passed, `@coderlifenet/form-core` 9 passed, `@coderlifenet/form-react` 24 passed, `@coderlifenet/form-server` 19 passed/7 skipped, `@coderlifenet/form-postgres` 6 skipped, `example-minimal` 1 passed. |
+| `npm run test:browser` | PASS: 14 Playwright checks (desktop + narrow). |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:browser:workspace` | PASS: workspace lifecycle flow 1 passed. |
+| `npm run verify:consumer` | PASS: single-tarball consumer smoke/install/runtime verification. |
+
+Live drag verification performed in the integrated browser on the minimal reference app:
+
+- Pointer drag reorder interaction verified (field order updates, drop indicator behavior preserved).
+- Runtime instrumentation confirmed custom `setDragImage` receives only dragged-field label and that drag-ghost cleanup happens on drag end.
+
+Coverage caveat:
+
+- This environment validates drag behavior in Playwright Chromium.
+- A native macOS Chrome cursor/globe visual cannot be directly captured here; final human acceptance of that exact platform-specific artifact remains pending Chris's hands-on check.
+
+UX and accessibility final acceptance remains pending Chris's review.
+
 ## Continuation: human-centered UX pass (2026-10-13)
 
 Branch: `feat/ui-0.2-integration`.

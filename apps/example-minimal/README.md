@@ -17,14 +17,34 @@ From repository root:
 ```bash
 npm ci
 npm run dev:infra
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed
 npm run build
-npm run dev -w @coderlifenet/form-server
+FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate
+# First setup only (or when you intentionally want fresh sample data):
+FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed
+```
+
+Start backend and frontend in separate terminals:
+
+Terminal 1 (backend)
+
+```bash
+FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder FORM_DEV_AUTH=true PORT=4010 npm run dev -w @coderlifenet/form-server
+```
+
+Terminal 2 (frontend)
+
+```bash
 npm run dev -w example-minimal
 ```
 
-Open the Vite URL and sign in is handled by the example host through `/dev/login`.
+URLs:
+
+- Frontend: http://127.0.0.1:4173/ (or the port Vite prints)
+- Backend API: http://127.0.0.1:4010/
+
+Sign-in for demo users is handled by the host through `/dev/login`.
+
+When you change reusable package code in `packages/`, restart both terminals so rebuilt package output is reloaded.
 
 ## Walkthrough
 
@@ -38,3 +58,4 @@ Open the Vite URL and sign in is handled by the example host through `/dev/login
 
 - Analytics runtime and consent controls are host-owned in AnalyticsHost.
 - This example demonstrates reusable integration, not TrackForge-specific behavior.
+- Keep existing local data by default. Do not run `db:seed` again unless you explicitly want to overwrite sample state.

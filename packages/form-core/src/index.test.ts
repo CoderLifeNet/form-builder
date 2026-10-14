@@ -48,6 +48,31 @@ describe("validateDefinition", () => {
 
     expect(() => validateDefinition(bad)).toThrow(/unknown source field/i);
   });
+
+  it("accepts radio field definitions", () => {
+    const good = {
+      metadata: { formId: "f2", name: "radio" },
+      sections: [{ id: "s1", title: "S", order: 0 }],
+      fields: [
+        {
+          id: "priority",
+          key: "priority",
+          type: "radio",
+          label: "Priority",
+          sectionId: "s1",
+          row: 0,
+          width: 6,
+          options: [
+            { id: "low", label: "Low" },
+            { id: "high", label: "High" }
+          ],
+          defaultValue: "low"
+        }
+      ]
+    };
+
+    expect(validateDefinition(good).fields[0].type).toBe("radio");
+  });
 });
 
 describe("compareDefinitions", () => {

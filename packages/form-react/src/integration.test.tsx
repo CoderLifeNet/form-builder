@@ -131,6 +131,35 @@ it("keeps saved single-select value and does not reapply defaults during option 
  expect((document.querySelector("input.MuiSelect-nativeInput") as HTMLInputElement).value).toBe("saved");
 });
 
+it("supports radio-button single-choice input selection", async () => {
+ const radioDefinition = validateDefinition({
+   metadata: { formId: "radio", name: "Radio" },
+   sections: [{ id: "s", title: "Details", order: 0 }],
+   fields: [{
+      id: "priority",
+      key: "priority",
+      type: "radio",
+      label: "Priority",
+      sectionId: "s",
+      row: 0,
+      width: 12,
+      required: true,
+      options: [
+         { id: "low", label: "Low" },
+         { id: "normal", label: "Normal" },
+         { id: "high", label: "High" }
+      ]
+   }]
+ });
+
+ render(<FormRenderer definition={radioDefinition} mode="new" initialValues={{ priority: "normal" }} />);
+ const normal = screen.getByRole("radio", { name: "Normal" });
+ expect((normal as HTMLInputElement).checked).toBe(true);
+ expect((normal as HTMLInputElement).name.length).toBeGreaterThan(0);
+ await userEvent.click(screen.getByRole("radio", { name: "Low" }));
+ expect((screen.getByRole("radio", { name: "Low" }) as HTMLInputElement).checked).toBe(true);
+});
+
 it("prevents in-flight source results from a previous form from leaking after cross-form switch",async()=>{
  const firstDefinition = validateDefinition({
   metadata: { formId: "form_one", name: "Form One" },

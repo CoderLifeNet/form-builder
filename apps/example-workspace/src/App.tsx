@@ -137,13 +137,30 @@ const starterDefinition: FormDefinition = {
       rules: []
     },
     {
+      id: "field_priority",
+      key: "field_priority",
+      type: "radio",
+      label: "Priority",
+      sectionId: "s2",
+      row: 1,
+      width: 6,
+      required: true,
+      defaultValue: "normal",
+      options: [
+        { id: "low", label: "Low" },
+        { id: "normal", label: "Normal" },
+        { id: "high", label: "High" }
+      ],
+      rules: []
+    },
+    {
       id: "field_attachment",
       key: "field_attachment",
       type: "single_file",
       label: "Attachment",
       sectionId: "s2",
-      row: 1,
-      width: 6,
+      row: 2,
+      width: 12,
       required: false,
       uploadPolicy: { maxFiles: 1, maxBytes: 10 * 1024 * 1024, mediaTypes: ["application/pdf", "image/png", "image/jpeg"] },
       rules: []
@@ -440,7 +457,7 @@ export function App(): ReactElement {
     <Box component="main" sx={{ maxWidth: 1200, margin: "0 auto", p: 2.5 }}>
       <Typography variant="h4" component="h1">Workspace and project form host example</Typography>
       <Typography variant="body1" sx={{ mt: 1 }}>
-        End-to-end flow for designing forms, publishing versions, collecting responses, and reviewing immutable history.
+        End-to-end flow for designing forms, publishing versions, collecting responses, and reviewing saved history.
       </Typography>
       <Typography aria-live="polite" variant="body2" color="text.secondary" sx={{ mt: 1 }}>{status}</Typography>
       <Stack direction="row" spacing={1} useFlexGap sx={{ mt: 1.5, mb: 2, flexWrap: "wrap" }}>

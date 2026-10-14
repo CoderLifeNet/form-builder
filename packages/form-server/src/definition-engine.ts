@@ -73,9 +73,9 @@ export async function validateSubmissionAgainstDefinition(
       continue;
     }
 
-    if (field.options && (field.type === "single_select" || field.type === "multi_select")) {
+    if (field.options && (field.type === "single_select" || field.type === "radio" || field.type === "multi_select")) {
       const allowed = new Set(field.options.map((option) => option.id));
-      const selected = field.type === "single_select" ? [String(value)] : (value as unknown[]).map((item) => String(item));
+      const selected = field.type === "single_select" || field.type === "radio" ? [String(value)] : (value as unknown[]).map((item) => String(item));
       const invalid = selected.find((item) => !allowed.has(item));
       if (invalid) {
         errors.push({
@@ -274,7 +274,7 @@ export function migrateRecordValuesToDefinition(
 }
 
 function validateFieldType(type: FieldType, value: unknown, label: string, fieldId: string): ValidationError | null {
-  const stringLike = ["text", "multiline", "date", "url", "single_select", "single_file"];
+  const stringLike = ["text", "multiline", "date", "url", "single_select", "radio", "single_file"];
   if (stringLike.includes(type) && typeof value !== "string") {
     return { fieldId, code: "INVALID_TYPE", message: `${label} must be a string` };
   }

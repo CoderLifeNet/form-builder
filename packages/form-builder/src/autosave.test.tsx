@@ -33,6 +33,13 @@ it("uses a single-field custom drag image for layout reordering",()=>{
  const layoutField=document.querySelector('section[aria-label="Form builder"] main button[draggable="true"]') as HTMLButtonElement | null;
  expect(layoutField).not.toBeNull();
  const setDragImage=vi.fn();
- fireEvent.dragStart(layoutField!,{dataTransfer:{setDragImage,effectAllowed:"none"}} as any);
+ const setData=vi.fn();
+ fireEvent.dragStart(layoutField!,{dataTransfer:{setDragImage,setData,effectAllowed:"none"}} as any);
  expect(setDragImage).toHaveBeenCalledTimes(1);
+ expect(setData).toHaveBeenCalledWith("application/x-coderlifenet-form-field","a");
+ expect(setData).toHaveBeenCalledWith("text/plain","a");
+ const dragGhost = setDragImage.mock.calls[0]?.[0] as HTMLElement;
+ expect(dragGhost?.isConnected).toBe(true);
+ fireEvent.dragEnd(layoutField!);
+ expect(dragGhost?.isConnected).toBe(false);
 });

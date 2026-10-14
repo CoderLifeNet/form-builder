@@ -11,6 +11,7 @@ export type FieldType =
   | "date"
   | "checkbox"
   | "single_select"
+  | "radio"
   | "multi_select"
   | "url"
   | "single_file"
@@ -23,6 +24,7 @@ export const fieldTypeSchema = z.enum([
   "date",
   "checkbox",
   "single_select",
+  "radio",
   "multi_select",
   "url",
   "single_file",
@@ -309,7 +311,7 @@ export function copyDefinition(definition: FormDefinition): FormDefinition {
       ...f, id: fieldIds.get(f.id)!, key: fieldIds.get(f.id)!, sectionId: sectionIds.get(f.sectionId)!,
       tracking: tracking(f.tracking),
       source: f.source ? { ...f.source, dependsOn: f.source.dependsOn?.map(id => fieldIds.get(id) ?? id) } : undefined,
-      defaultValue: f.type === "single_select" || f.type === "multi_select" ? optionValue(f.defaultValue) : f.defaultValue,
+      defaultValue: f.type === "single_select" || f.type === "radio" || f.type === "multi_select" ? optionValue(f.defaultValue) : f.defaultValue,
       options: f.options?.map(o => ({ ...o, id: optionIds.get(o.id)! })),
       rules: f.rules.map(r => ({ ...r, id: createStableId("rule"), sourceFieldId: fieldIds.get(r.sourceFieldId)!, value: optionValue(r.value) as typeof r.value }))
     }))

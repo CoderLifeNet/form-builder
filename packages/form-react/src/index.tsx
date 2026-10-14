@@ -15,6 +15,8 @@ import {
   InputLabel,
   IconButton,
   Tooltip,
+  Radio,
+  RadioGroup,
   MenuItem,
   Paper,
   Select,
@@ -281,9 +283,35 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                   );
                 }
 
-                if (field.type === "single_select" || field.type === "multi_select") {
+                if (field.type === "single_select" || field.type === "radio" || field.type === "multi_select") {
                   const options = sourceOptions[field.id] ?? field.options ?? [];
-                  const selected = field.type === "single_select" ? String(value ?? "") : ((value ?? []) as string[]);
+                  const selected = field.type === "single_select" || field.type === "radio" ? String(value ?? "") : ((value ?? []) as string[]);
+                  if (field.type === "radio") {
+                    return (
+                      <FormControl key={field.id} sx={{ gridColumn: { xs: "span 12", sm: `span ${field.width}` } }} error={Boolean(error)} disabled={disabled}>
+                        <Typography id={`${inputId}-label`} component="label" variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
+                          {label}
+                        </Typography>
+                        <RadioGroup
+                          aria-labelledby={`${inputId}-label`}
+                          name={inputId}
+                          value={selected}
+                          onChange={(event) => setFieldValue(field.id, event.target.value, setValues)}
+                        >
+                          {options.map((option) => (
+                            <FormControlLabel
+                              key={option.id}
+                              value={option.id}
+                              control={<Radio slotProps={{ input: { ...inputA11y, readOnly } }} />}
+                              label={option.label}
+                              disabled={disabled || readOnly}
+                            />
+                          ))}
+                        </RadioGroup>
+                        <FormHelperText id={helperId}>{helpText}</FormHelperText>
+                      </FormControl>
+                    );
+                  }
                   return (
                     <FormControl key={field.id} sx={{ gridColumn: { xs: "span 12", sm: `span ${field.width}` } }} error={Boolean(error)} disabled={disabled}>
                       <InputLabel id={`${inputId}-label`}>{label}</InputLabel>

@@ -34,6 +34,7 @@ export type ManagedForm = {
 type BuilderTab = "basic" | "data" | "rules" | "layout" | "settings";
 type SaveState = "saved" | "saving" | "publishing" | "unsaved" | "error";
 type Field = FormDefinition["fields"][number];
+const DRAG_FIELD_MIME = "application/x-coderlifenet-form-field";
 
 const paletteFields: Array<{ type: Field["type"]; label: string }> = [
   { type: "text", label: "Text" },
@@ -41,7 +42,8 @@ const paletteFields: Array<{ type: Field["type"]; label: string }> = [
   { type: "number", label: "Number" },
   { type: "date", label: "Date" },
   { type: "checkbox", label: "Checkbox" },
-  { type: "single_select", label: "Single select" },
+  { type: "single_select", label: "Dropdown" },
+  { type: "radio", label: "Radio buttons" },
   { type: "multi_select", label: "Multi select" },
   { type: "url", label: "URL" },
   { type: "single_file", label: "Single file" },
@@ -81,7 +83,7 @@ export function FormManager(props: {
       <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ justifyContent: "space-between", alignItems: { xs: "flex-start", md: "center" } }}>
         <Box>
           <Typography variant="h5" component="h2">Forms</Typography>
-          <Typography variant="body2" color="text.secondary">Create and manage reusable form designs. Published versions stay immutable for response history.</Typography>
+          <Typography variant="body2" color="text.secondary">Create and manage reusable form designs. Publishing makes a locked version for new responses while older responses keep their original form.</Typography>
         </Box>
         <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
           <Button aria-label="Import form" title="Import form" type="button" variant="outlined" onClick={props.onImportAsNew}>
@@ -195,6 +197,7 @@ export function FormBuilder(props: {
   const savedSnapshot = useRef(JSON.stringify(props.initialDefinition));
   const queue = useRef<Promise<void>>(Promise.resolve());
   const formId = useRef(definition.metadata.formId);
+  const dragGhost = useRef<HTMLDivElement | null>(null);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
   const [dropTargetFieldId, setDropTargetFieldId] = useState<string | null>(null);
 
@@ -261,7 +264,7 @@ export function FormBuilder(props: {
       row: definition.fields.length,
       width: type === "single_file" || type === "multi_file" || type === "multiline" ? 12 : 6,
       rules: [],
-      ...(type === "single_select" || type === "multi_select"
+      ...(type === "single_select" || type === "radio" || type === "multi_select"
         ? {
             options: [
               { id: createStableId("option"), label: "Option A" },
@@ -403,7 +406,8 @@ export function FormBuilder(props: {
   const handleCanvasDrop = (event: DragEvent<HTMLButtonElement>, targetFieldId: string): void => {
     event.preventDefault();
     setDropTargetFieldId(null);
-    if (!draggingFieldId || draggingFieldId === targetFieldId) {
+    const draggedFieldId = event.dataTransfer.getData(DRAG_FIELD_MIME) || draggingFieldId;
+    if (!draggedFieldId || draggedFieldId === targetFieldId) {
       return;
     }
 
@@ -412,8 +416,15 @@ export function FormBuilder(props: {
       return;
     }
 
-    moveFieldToIndex(draggingFieldId, targetIndex);
+    moveFieldToIndex(draggedFieldId, targetIndex);
     setDraggingFieldId(null);
+  };
+
+  const clearDragGhost = (): void => {
+    if (dragGhost.current?.parentNode) {
+      dragGhost.current.parentNode.removeChild(dragGhost.current);
+    }
+    dragGhost.current = null;
   };
 
   const persist = (publish: boolean, manual: boolean): Promise<void> => {
@@ -462,7 +473,7 @@ export function FormBuilder(props: {
       <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ justifyContent: "space-between", alignItems: { xs: "flex-start", sm: "center" } }}>
         <Box>
           <Typography variant="h5" component="h2">Form designer</Typography>
-          <Typography variant="body2" color="text.secondary">Build the form structure, save draft changes, then publish a new immutable form version.</Typography>
+          <Typography variant="body2" color="text.secondary">Build the form structure, save draft changes, then publish a new version for future responses.</Typography>
         </Box>
         <Stack direction="row" spacing={1} useFlexGap sx={{ alignItems: "center", flexWrap: "wrap" }}>
           <Typography role="status" aria-live="polite" variant="body2" color={saveState === "error" ? "error" : "text.secondary"}>
@@ -505,16 +516,16 @@ export function FormBuilder(props: {
             <AccessibilityEditor value={definition.accessibility} onChange={accessibility => updateDefinition(prev => ({ ...prev, accessibility }))} />
           </Box>
           <Box>
-            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Connected source dependencies</Typography>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Connected host data</Typography>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.25 }}>
-              These dependencies are host integrations. Authors can choose how fields use them, but hosts provide the actual source endpoints.
+              Fields can use data provided by your host application. Authors choose how fields use it, but hosts control the actual integrations.
             </Typography>
             {unresolvedDependencies.length ? (
               <Stack spacing={1}>
                 {unresolvedDependencies.map((entry) => (
                   <Paper key={entry.sourceId} variant="outlined" sx={{ p: 1 }}>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {entry.sourceId}: expected {entry.expectedVersion}, available {entry.availableVersion ?? "not available"}
+                      {entry.sourceId}: form expects {entry.expectedVersion}, host has {entry.availableVersion ?? "not available"}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
                       Affected fields: {entry.affectedFields.length ? entry.affectedFields.map((field) => field.label).join(", ") : "none"}
@@ -534,11 +545,11 @@ export function FormBuilder(props: {
                   </Paper>
                 ))}
                 <Typography variant="caption" color="text.secondary">
-                  Publish is blocked until source versions match or fields are updated to available sources.
+                  You cannot publish until these host-data mismatches are resolved.
                 </Typography>
               </Stack>
             ) : (
-              <Typography variant="body2" color="text.secondary">All declared dependencies currently match available host source versions.</Typography>
+              <Typography variant="body2" color="text.secondary">All required host data connections are available for this draft.</Typography>
             )}
           </Box>
         </Stack>
@@ -591,29 +602,32 @@ export function FormBuilder(props: {
                 onDragStart={(event) => {
                   setDraggingFieldId(field.id);
                   setDropTargetFieldId(null);
+                  clearDragGhost();
                   const ghost = document.createElement("div");
                   ghost.textContent = field.label;
                   ghost.style.position = "fixed";
-                  ghost.style.top = "-9999px";
-                  ghost.style.left = "-9999px";
+                  ghost.style.top = "0";
+                  ghost.style.left = "0";
+                  ghost.style.transform = "translate(-10000px, -10000px)";
                   ghost.style.padding = "8px 12px";
                   ghost.style.borderRadius = "8px";
                   ghost.style.background = "#0b57d0";
                   ghost.style.color = "#fff";
                   ghost.style.font = "600 13px sans-serif";
+                  ghost.style.lineHeight = "1.2";
+                  ghost.style.whiteSpace = "nowrap";
                   ghost.style.pointerEvents = "none";
                   document.body.appendChild(ghost);
-                  event.dataTransfer.setDragImage(ghost, 12, 12);
+                  dragGhost.current = ghost;
+                  event.dataTransfer.setData(DRAG_FIELD_MIME, field.id);
+                  event.dataTransfer.setData("text/plain", field.id);
+                  event.dataTransfer.setDragImage(ghost, 14, 14);
                   event.dataTransfer.effectAllowed = "move";
-                  queueMicrotask(() => {
-                    if (ghost.parentNode) {
-                      ghost.parentNode.removeChild(ghost);
-                    }
-                  });
                 }}
                 onDragEnd={() => {
                   setDraggingFieldId(null);
                   setDropTargetFieldId(null);
+                  clearDragGhost();
                 }}
                 onDragOver={(event) => {
                   event.preventDefault();
@@ -745,19 +759,20 @@ export function FormBuilder(props: {
               {activeTab === "data" ? (
                 <Stack spacing={1.25}>
                   {selectedField.source && <>
-                    <TextField select label="Source purpose" value={selectedField.source.kind ?? "value"} slotProps={{ select: { native: true } }} onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, kind: e.target.value as "value" | "options" } }))}><option value="value">Value</option><option value="options">Options</option></TextField>
-                    <TextField label="Refresh when these field IDs change" value={selectedField.source.dependsOn?.join(",") ?? ""} helperText="Example: field_region, field_location" onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, dependsOn: e.target.value.split(",").map(id => id.trim()).filter(Boolean) } }))} />
+                    <TextField select label="What this host data provides" value={selectedField.source.kind ?? "value"} slotProps={{ select: { native: true } }} onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, kind: e.target.value as "value" | "options" } }))}><option value="value">Field value</option><option value="options">Choice list</option></TextField>
+                    <TextField label="Refresh when these field IDs change" value={selectedField.source.dependsOn?.join(",") ?? ""} helperText="Example: field_region, field_location. Use this when available choices depend on another answer." onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, dependsOn: e.target.value.split(",").map(id => id.trim()).filter(Boolean) } }))} />
                   </>}
                   <TextField
-                    label="Default value"
+                    label="Starting value"
                     value={toEditableDefaultValue(selectedField.defaultValue)}
+                    helperText="Optional value shown before someone enters a response."
                     onChange={(event) => updateSelectedField((field) => ({ ...field, defaultValue: event.target.value || undefined }))}
                   />
                   <FormControl size="small">
-                    <InputLabel id="field-source-label">Fill from host source</InputLabel>
+                    <InputLabel id="field-source-label">Prefill from host data</InputLabel>
                     <Select
                       labelId="field-source-label"
-                      label="Fill from host source"
+                      label="Prefill from host data"
                       value={selectedField.source?.id ?? ""}
                       onChange={(event) => {
                         const nextId = String(event.target.value);
@@ -781,10 +796,10 @@ export function FormBuilder(props: {
 
                   {selectedField.source ? (
                     <FormControl size="small">
-                      <InputLabel id="field-source-mode-label">When source values apply</InputLabel>
+                      <InputLabel id="field-source-mode-label">When host data should update this field</InputLabel>
                       <Select
                         labelId="field-source-mode-label"
-                        label="When source values apply"
+                        label="When host data should update this field"
                         value={selectedField.source.mode}
                         onChange={(event) => {
                           const mode = event.target.value as NonNullable<Field["source"]>["mode"];
@@ -794,15 +809,15 @@ export function FormBuilder(props: {
                           }));
                         }}
                       >
-                        <MenuItem value="manual">Manual entry only</MenuItem>
-                        <MenuItem value="create_only">Set once when response is first created</MenuItem>
-                        <MenuItem value="refresh_on_edit">Refresh each time the response is edited</MenuItem>
-                        <MenuItem value="display_only">Always show host-provided value</MenuItem>
+                        <MenuItem value="manual">Never auto-update (manual entry only)</MenuItem>
+                        <MenuItem value="create_only">Set once when a response is first created</MenuItem>
+                        <MenuItem value="refresh_on_edit">Update each time the response is edited</MenuItem>
+                        <MenuItem value="display_only">Always show host data (read-only)</MenuItem>
                       </Select>
                     </FormControl>
                   ) : null}
 
-                  {selectedField.type === "single_select" || selectedField.type === "multi_select" ? (
+                  {selectedField.type === "single_select" || selectedField.type === "radio" || selectedField.type === "multi_select" ? (
                     <TextField
                       multiline
                       minRows={4}
@@ -1050,7 +1065,9 @@ function defaultLabelByType(type: Field["type"]): string {
     case "checkbox":
       return "Checkbox";
     case "single_select":
-      return "Select one";
+      return "Choose from dropdown";
+    case "radio":
+      return "Choose one option";
     case "multi_select":
       return "Select many";
     case "url":
@@ -1084,9 +1101,9 @@ function tabLabel(tab: BuilderTab): string {
 function tabHelpText(tab: BuilderTab): string {
   switch (tab) {
     case "basic":
-      return "Label, helper copy, placeholders, requiredness, and upload constraints.";
+      return "Label, guidance text, placeholder text, required setting, and upload limits.";
     case "data":
-      return "Connect host-provided sources or keep manual entry only.";
+      return "Choose whether this field is entered manually or prefilled from host data.";
     case "rules":
       return "Set validation and conditional behavior for this field.";
     case "layout":
@@ -1117,10 +1134,10 @@ function saveStateLabel(state: SaveState): string {
 
 function previewByType(field: Field): string {
   if (field.source) {
-    return `Source: ${field.source.id}`;
+    return `Prefilled from ${field.source.id}`;
   }
 
-  if (field.type === "single_select" || field.type === "multi_select") {
+  if (field.type === "single_select" || field.type === "radio" || field.type === "multi_select") {
     return (field.options ?? []).map((option) => option.label).join(", ") || "No options";
   }
 

@@ -50,6 +50,39 @@ const starterDefinition: FormDefinition = {
       tracking: { id: "request-title", semanticId: "request-title-control", events: ["ui.text_field.change"] },
       validation: { minLength: 4 },
       rules: []
+    },
+    {
+      id: "field_category",
+      key: "field_category",
+      type: "single_select",
+      label: "Category",
+      required: true,
+      sectionId: "sec_b",
+      row: 1,
+      width: 6,
+      options: [
+        { id: "equipment", label: "Equipment" },
+        { id: "access", label: "Access" },
+        { id: "other", label: "Other" }
+      ],
+      rules: []
+    },
+    {
+      id: "field_priority",
+      key: "field_priority",
+      type: "radio",
+      label: "Priority",
+      required: true,
+      sectionId: "sec_b",
+      row: 1,
+      width: 6,
+      defaultValue: "normal",
+      options: [
+        { id: "low", label: "Low" },
+        { id: "normal", label: "Normal" },
+        { id: "high", label: "High" }
+      ],
+      rules: []
     }
   ],
   dependencyVersions: {
