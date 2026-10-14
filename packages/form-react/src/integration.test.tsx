@@ -253,6 +253,16 @@ it("preserves edits across rerenders of the same render identity", async () => {
  await waitFor(() => expect((screen.getByRole("textbox", { name: "Title" }) as HTMLInputElement).value).toBe("local-edit"));
 });
 
+it("runs draft preview without persistence side effects", async () => {
+ const submit = vi.fn(async () => undefined);
+ render(<FormRenderer definition={definition} mode="preview" initialValues={{ field: "Preview value" }} onSubmit={submit} />);
+
+ expect(screen.getByText("Preview mode uses the draft renderer only. Responses and uploads are not saved.")).toBeTruthy();
+ await userEvent.click(screen.getByRole("button", { name: "Check preview" }));
+ await screen.findByText("Preview check passed. Responses are not saved in preview mode.");
+ expect(submit).toHaveBeenCalledTimes(0);
+});
+
 it("drops pending submission side effects when identity changes before delayed source resolution completes", async () => {
  const sourceDefinition = validateDefinition({
   metadata: { formId: "submit_form", name: "Submit Form" },

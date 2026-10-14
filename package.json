@@ -14,6 +14,9 @@
   },
   "scripts": {
     "build": "npm run build -w @coderlifenet/form-builder && npm run build -w example-minimal && npm run build -w example-workspace",
+    "dev": "node scripts/dev-local.mjs workspace",
+    "dev:workspace": "node scripts/dev-local.mjs workspace",
+    "dev:minimal": "node scripts/dev-local.mjs minimal",
     "test": "npm run test -ws --if-present",
     "typecheck": "npm run typecheck -ws --if-present",
     "pack:artifacts": "rm -rf tmp/packs && mkdir -p tmp/packs && npm pack -w @coderlifenet/form-builder --pack-destination tmp/packs",

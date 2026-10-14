@@ -18,26 +18,34 @@ The public package targets the exact published `0.2.0-alpha.0` UI pair through h
 npm ci
 ```
 
-1. Start local infrastructure:
+1. Start workspace example locally with one command:
 
 ```bash
-npm run dev:infra
+npm run dev
 ```
 
-Uploads default to private filesystem storage. Configure optional S3-compatible storage via `.env` values described in `docs/file-storage.md`.
+This command checks prerequisites, starts Docker PostgreSQL, waits for readiness,
+builds required package artifacts, runs migrations on the dedicated local development
+database, and starts backend + workspace frontend with matching API URLs.
 
-1. Build packages/apps:
+1. Start the minimal example with one command:
 
 ```bash
-npm run build
+npm run dev:minimal
 ```
 
-1. Run migrations and seed (host port is `55432`):
+1. Optional first-time demo seed (explicit only):
 
 ```bash
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed
+FORM_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder npm run db:seed
 ```
+
+By default startup preserves existing local database and uploads.
+It does not reset volumes, drop data, or reseed automatically.
+
+1. Stop local processes with `Ctrl+C` in the running dev command terminal.
+
+Use `npm run dev:infra:down` only when you intentionally want to stop Docker services.
 
 1. Run tests:
 
@@ -49,7 +57,7 @@ Normal tests use fixtures/mocks and do not start or use a database. For SQL/API
 integration, create a dedicated test database once and run explicitly:
 
 ```bash
-FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:integration
+FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:integration
 ```
 
 This connects to an already-running test database; it does not start Docker.

@@ -2,9 +2,15 @@ import { useEffect, useState, useRef, type ReactElement } from "react";
 import { FormBuilder } from "@coderlifenet/form-builder/builder";
 import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer } from "@coderlifenet/form-builder/renderer";
 import type { FormDefinition } from "@coderlifenet/form-builder/core";
-import { Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
+import { Alert, Box, Button, CssBaseline, Paper, Stack, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
-const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://localhost:4010";
+const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://127.0.0.1:4010";
+const sourceMetadata = {
+  "profile.first_name": { name: "Current user first name", description: "Provided by host identity profile." },
+  "profile.last_name": { name: "Current user last name", description: "Provided by host identity profile." },
+  "request.categories": { name: "Request categories", description: "Host-provided list of valid categories." },
+  "request.title_hint": { name: "Request title hint", description: "Optional host-generated title suggestion." }
+} as const;
 
 const starterDefinition: FormDefinition = {
   metadata: { formId: "demo-min", name: "Minimal service request", schemaVersion: "1.0.0" },
@@ -97,7 +103,7 @@ export function App(): ReactElement {
   const submissionKey = useRef(createMutationRetryKey());
   const [definition, setDefinition] = useState(starterDefinition);
   const [publishedDefinition, setPublishedDefinition] = useState<FormDefinition | null>(null);
-  const [mode, setMode] = useState<"builder" | "renderer">("builder");
+  const [mode, setMode] = useState<"builder" | "renderer" | "preview">("builder");
   const [useCustomTheme, setUseCustomTheme] = useState(false);
   const [formId, setFormId] = useState<string>("");
   const [draftRevision, setDraftRevision] = useState<number>(1);
@@ -105,29 +111,44 @@ export function App(): ReactElement {
   revisionRef.current = draftRevision;
   const [definitionId, setDefinitionId] = useState<string>("");
   const [status, setStatus] = useState<string>("Connecting...");
+  const [initialized, setInitialized] = useState(false);
+  const initStarted = useRef(false);
+
+  const initialize = async (): Promise<void> => {
+    setStatus("Connecting...");
+    setInitialized(false);
+    try {
+      await api("/dev/login", {
+        method: "POST",
+        body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+      });
+      const uniqueSuffix = typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID().slice(0, 8)
+        : Math.random().toString(36).slice(2, 10);
+      const created = await api<{ formId: string; draftRevision: number }>("/api/forms", {
+        method: "POST",
+        body: JSON.stringify({
+          name: `Minimal ${new Date().toISOString()} ${uniqueSuffix}`,
+          description: "Minimal example form",
+          definition
+        })
+      });
+      setFormId(created.formId);
+      setDraftRevision(created.draftRevision);
+      setStatus(`Connected as owner1 (${created.formId})`);
+      setInitialized(true);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Unable to connect");
+      setInitialized(false);
+    }
+  };
 
   useEffect(() => {
-    void (async () => {
-      try {
-        await api("/dev/login", {
-          method: "POST",
-          body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
-        });
-        const created = await api<{ formId: string; draftRevision: number }>("/api/forms", {
-          method: "POST",
-          body: JSON.stringify({
-            name: `Minimal ${new Date().toISOString()}`,
-            description: "Minimal example form",
-            definition
-          })
-        });
-        setFormId(created.formId);
-        setDraftRevision(created.draftRevision);
-        setStatus(`Created ${created.formId}`);
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "Unable to connect");
-      }
-    })();
+    if (initStarted.current) {
+      return;
+    }
+    initStarted.current = true;
+    void initialize();
   }, []);
 
   const customTheme = createTheme({
@@ -157,6 +178,7 @@ export function App(): ReactElement {
       <Typography variant="h4" component="h1">Minimal form host example</Typography>
       <Typography variant="body1" sx={{ mt: 1 }}>Design a form, publish a version, then fill it out with the same reusable package.</Typography>
       <Typography aria-live="polite" variant="body2" color="text.secondary" sx={{ mt: 1 }}>{status}</Typography>
+      {!initialized ? <Alert severity="warning" sx={{ mt: 1.5 }}>Connection is not ready yet. Sign-in and form initialization must complete before saving drafts or submitting responses.</Alert> : null}
       <Paper variant="outlined" sx={{ p: 1.25, mt: 1.5, mb: 2 }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={1.25} sx={{ justifyContent: "space-between", alignItems: { md: "center" } }}>
           <Box>
@@ -165,7 +187,9 @@ export function App(): ReactElement {
           </Box>
           <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
             <Button type="button" variant={mode === "builder" ? "contained" : "outlined"} onClick={() => setMode("builder")}>Design form</Button>
-            <Button type="button" variant={mode === "renderer" ? "contained" : "outlined"} onClick={() => setMode("renderer")}>Fill out form</Button>
+            <Button type="button" disabled={!initialized} variant={mode === "renderer" ? "contained" : "outlined"} onClick={() => setMode("renderer")}>Fill out form</Button>
+            <Button type="button" disabled={!initialized} variant={mode === "preview" ? "contained" : "outlined"} onClick={() => setMode("preview")}>Preview draft</Button>
+            {!initialized ? <Button type="button" variant="outlined" onClick={() => void initialize()}>Retry connection</Button> : null}
             <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
               {useCustomTheme ? "Use custom theme" : "Use default theme"}
             </Button>
@@ -175,8 +199,10 @@ export function App(): ReactElement {
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Box hidden={mode !== "builder"}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Form design and publishing</Typography>
-          <FormBuilder
+          {!initialized ? <Alert severity="info" sx={{ mb: 1 }}>Builder opens after initialization finishes so draft saves can succeed.</Alert> : null}
+          {initialized ? <FormBuilder
             initialDefinition={definition}
+            sourceMetadata={sourceMetadata}
             onReloadDraft={async () => { const draft = await api<{revision:number;definition:FormDefinition}>(`/api/forms/${formId}/draft`); revisionRef.current = draft.revision; setDraftRevision(draft.revision); setDefinition(draft.definition); return draft.definition; }}
             sourceCapabilities={{ "profile.first_name": "1", "profile.last_name": "1", "request.categories": "1", "request.title_hint": "1" }}
             onSaveDraft={async (nextDefinition) => {
@@ -213,11 +239,12 @@ export function App(): ReactElement {
               setPublishedDefinition(nextDefinition);
               setStatus(`Published v${published.publicationVersion}`);
             }}
-          />
+          /> : null}
         </Box>
         <Box hidden={mode !== "renderer"}>
           <Typography variant="subtitle1" sx={{ mb: 1 }}>Form response capture</Typography>
-          <FormRenderer
+          {!initialized ? <Alert severity="info" sx={{ mb: 1 }}>Connection is still initializing. Fill out form becomes available when setup completes.</Alert> : null}
+          {initialized ? <FormRenderer
             key={definitionId}
             definition={publishedDefinition ?? definition}
             mode="new"
@@ -237,6 +264,14 @@ export function App(): ReactElement {
               submissionKey.current.committed();
               setStatus(`Submitted ${result.recordId}`);
             }}
+          /> : null}
+        </Box>
+        <Box hidden={mode !== "preview"}>
+          <Typography variant="subtitle1" sx={{ mb: 1 }}>Preview draft (no persistence)</Typography>
+          <FormRenderer
+            key={`preview-${definition.metadata.formId}`}
+            definition={definition}
+            mode="preview"
           />
         </Box>
       </Paper>

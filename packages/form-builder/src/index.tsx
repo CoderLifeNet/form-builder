@@ -183,6 +183,7 @@ export function FormBuilder(props: {
   onReloadDraft?: () => Promise<FormDefinition>;
   autosaveDelay?: number | false;
   sourceCapabilities?: Record<string, string>;
+  sourceMetadata?: Record<string, { name?: string; description?: string }>;
   onDefinitionChange?: (definition: FormDefinition) => void;
 }): ReactElement {
   const [definition, setDefinition] = useState<FormDefinition>(props.initialDefinition);
@@ -209,9 +210,12 @@ export function FormBuilder(props: {
     return Object.entries(definition.dependencyVersions)
       .map(([sourceId, expectedVersion]) => {
         const availableVersion = props.sourceCapabilities?.[sourceId];
+        const sourceMeta = props.sourceMetadata?.[sourceId];
         const affectedFields = definition.fields.filter((field) => field.source?.id === sourceId);
         return {
           sourceId,
+          sourceName: sourceMeta?.name,
+          sourceDescription: sourceMeta?.description,
           expectedVersion,
           availableVersion,
           affectedFields
@@ -245,6 +249,10 @@ export function FormBuilder(props: {
   }, [definition.sections, definition.fields, selectedFieldId, selectedSectionId]);
 
   const selectedField = definition.fields.find((field) => field.id === selectedFieldId) ?? null;
+  const dependencyFieldChoices = useMemo(
+    () => definition.fields.filter((field) => field.id !== selectedFieldId),
+    [definition.fields, selectedFieldId]
+  );
   const sectionChoices = definition.sections;
   const orderedSections = useMemo(
     () => [...definition.sections].sort((a, b) => a.order - b.order),
@@ -349,6 +357,7 @@ export function FormBuilder(props: {
   };
 
   const removeField = (fieldId: string): void => {
+    const nextSelection = definition.fields.find((field) => field.id !== fieldId)?.id ?? null;
     updateDefinition((prev) => {
       const filteredFields = prev.fields
         .filter((field) => field.id !== fieldId)
@@ -362,6 +371,7 @@ export function FormBuilder(props: {
     });
 
     setSelectedFieldId((current) => (current === fieldId ? definition.fields.find((field) => field.id !== fieldId)?.id ?? null : current));
+    setSelectedFieldId((current) => (current === fieldId ? nextSelection : current));
   };
 
   const addSection = (): void => {
@@ -670,8 +680,18 @@ export function FormBuilder(props: {
                 {unresolvedDependencies.map((entry) => (
                   <Paper key={entry.sourceId} variant="outlined" sx={{ p: 1 }}>
                     <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                      {entry.sourceId}: form expects {entry.expectedVersion}, host has {entry.availableVersion ?? "not available"}
+                      {entry.sourceName ?? entry.sourceId}: form expects {entry.expectedVersion}, host has {entry.availableVersion ?? "not available"}
                     </Typography>
+                    {entry.sourceName ? (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                        Source ID: {entry.sourceId}
+                      </Typography>
+                    ) : null}
+                    {entry.sourceDescription ? (
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>
+                        {entry.sourceDescription}
+                      </Typography>
+                    ) : null}
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
                       Affected fields: {entry.affectedFields.length ? entry.affectedFields.map((field) => field.label).join(", ") : "none"}
                     </Typography>
@@ -901,7 +921,7 @@ export function FormBuilder(props: {
                         type="button"
                         variant={selectedFieldId === field.id ? "contained" : "outlined"}
                         sx={{
-                          gridColumn: `span ${field.width}`,
+                          gridColumn: { xs: "span 12", sm: `span ${field.width}` },
                           textAlign: "left",
                           justifyContent: "flex-start",
                           p: 1,
@@ -1018,11 +1038,18 @@ export function FormBuilder(props: {
           <Stack direction="row" sx={{ justifyContent: "space-between", alignItems: "center", mb: 1 }}>
             <Typography variant="h6">Field settings</Typography>
             {selectedField ? (
-              <Tooltip title="Remove field">
-                <IconButton aria-label="Remove field" size="small" color="error" onClick={() => removeField(selectedField.id)}>
-                  ✕
-                </IconButton>
-              </Tooltip>
+              <Stack direction="row" spacing={0.5}>
+                <Tooltip title="Close settings">
+                  <IconButton aria-label="Close settings" size="small" onClick={() => setSelectedFieldId(null)}>
+                    ✕
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Delete field">
+                  <IconButton aria-label="Delete field" size="small" color="error" onClick={() => removeField(selectedField.id)}>
+                    🗑
+                  </IconButton>
+                </Tooltip>
+              </Stack>
             ) : null}
           </Stack>
 
@@ -1086,7 +1113,35 @@ export function FormBuilder(props: {
                 <Stack spacing={1.25}>
                   {selectedField.source && <>
                     <TextField select label="What this host data provides" value={selectedField.source.kind ?? "value"} slotProps={{ select: { native: true } }} onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, kind: e.target.value as "value" | "options" } }))}><option value="value">Field value</option><option value="options">Choice list</option></TextField>
-                    <TextField label="Refresh when these field IDs change" value={selectedField.source.dependsOn?.join(",") ?? ""} helperText="Example: field_region, field_location. Use this when available choices depend on another answer." onChange={e => updateSelectedField(field => ({ ...field, source: { ...field.source!, dependsOn: e.target.value.split(",").map(id => id.trim()).filter(Boolean) } }))} />
+                    <FormControl size="small">
+                      <InputLabel id="field-depends-on-label">Refresh when these fields change</InputLabel>
+                      <Select
+                        labelId="field-depends-on-label"
+                        label="Refresh when these fields change"
+                        multiple
+                        value={selectedField.source.dependsOn ?? []}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          const dependsOn = Array.isArray(value)
+                            ? value.map(String)
+                            : String(value).split(",").map((id) => id.trim()).filter(Boolean);
+                          updateSelectedField((field) => ({ ...field, source: { ...field.source!, dependsOn } }));
+                        }}
+                        renderValue={(selected) => {
+                          const ids = Array.isArray(selected) ? selected.map(String) : [];
+                          return ids
+                            .map((id) => dependencyFieldChoices.find((field) => field.id === id)?.label ?? id)
+                            .join(", ");
+                        }}
+                      >
+                        {dependencyFieldChoices.map((field) => (
+                          <MenuItem key={field.id} value={field.id}>{field.label} ({field.id})</MenuItem>
+                        ))}
+                      </Select>
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5 }}>
+                        Optional. Refresh this host data when one of these answers changes.
+                      </Typography>
+                    </FormControl>
                   </>}
                   <TextField
                     label="Starting value"
@@ -1115,10 +1170,15 @@ export function FormBuilder(props: {
                       }}
                     >
                       <MenuItem value="">Manual entry</MenuItem>
-                      {selectedField.source && !props.sourceCapabilities?.[selectedField.source.id] && <MenuItem value={selectedField.source.id}>{selectedField.source.id} (unavailable)</MenuItem>}
-                      {Object.entries(props.sourceCapabilities ?? {}).map(([id, version]) => <MenuItem key={id} value={id}>{id} ({version})</MenuItem>)}
+                      {selectedField.source && !props.sourceCapabilities?.[selectedField.source.id] && <MenuItem value={selectedField.source.id}>{props.sourceMetadata?.[selectedField.source.id]?.name ?? selectedField.source.id} ({selectedField.source.id}) unavailable</MenuItem>}
+                      {Object.entries(props.sourceCapabilities ?? {}).map(([id, version]) => <MenuItem key={id} value={id}>{props.sourceMetadata?.[id]?.name ?? id} ({id}) v{version}</MenuItem>)}
                     </Select>
                   </FormControl>
+                  {selectedField.source ? (
+                    <Typography variant="caption" color="text.secondary">
+                      {props.sourceMetadata?.[selectedField.source.id]?.description ?? "Host controls source availability, permissions, and returned values."}
+                    </Typography>
+                  ) : null}
 
                   {selectedField.source ? (
                     <FormControl size="small">

@@ -16,30 +16,41 @@ From repository root:
 
 ```bash
 npm ci
-npm run dev:infra
-npm run build
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:migrate
-# First setup only (or when you intentionally want fresh sample data):
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder npm run db:seed
+npm run dev:minimal
 ```
 
-Start backend and frontend in separate terminals:
+This single command:
+
+- checks prerequisites (Node/npm/Docker/ports),
+- starts local PostgreSQL in Docker and waits for readiness,
+- builds required artifacts before migrations,
+- applies migrations to `postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder`,
+- starts backend + minimal frontend with matching API URL wiring,
+- labels output and shuts down child processes cleanly on `Ctrl+C`.
+
+Optional explicit seed (first setup only, or when intentionally desired):
+
+```bash
+FORM_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder npm run db:seed
+```
+
+Manual mode (separate terminals) remains available:
 
 Terminal 1 (backend)
 
 ```bash
-FORM_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder FORM_DEV_AUTH=true PORT=4010 npm run dev -w @coderlifenet/form-server
+FORM_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder FORM_DEV_AUTH=true PORT=4010 npm run dev -w @coderlifenet/form-server
 ```
 
 Terminal 2 (frontend)
 
 ```bash
-npm run dev -w example-minimal
+VITE_FORM_API_BASE_URL=http://127.0.0.1:4010 npm run dev -w example-minimal -- --host 127.0.0.1 --port 4173 --strictPort
 ```
 
 URLs:
 
-- Frontend: http://127.0.0.1:4173/ (or the port Vite prints)
+- Frontend: http://127.0.0.1:4173/
 - Backend API: http://127.0.0.1:4010/
 
 Sign-in for demo users is handled by the host through `/dev/login`.
@@ -58,4 +69,4 @@ When you change reusable package code in `packages/`, restart both terminals so 
 
 - Analytics runtime and consent controls are host-owned in AnalyticsHost.
 - This example demonstrates reusable integration, not TrackForge-specific behavior.
-- Keep existing local data by default. Do not run `db:seed` again unless you explicitly want to overwrite sample state.
+- Keep existing local data by default. Startup does not reset, delete volumes, or reseed.

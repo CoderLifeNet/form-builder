@@ -4,6 +4,40 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: hands-on findings implementation closure (2026-10-14)
+
+Branch: `feat/ui-0.2-integration`.
+
+This pass completed the requested hands-on fixes without expanding scope:
+
+- **One-command startup**: added root `npm run dev` / `npm run dev:minimal` / `npm run dev:workspace` orchestration with prerequisite checks, local-only DB safety checks, compose startup and readiness wait, build-before-migrate, non-destructive migration flow, labeled backend/frontend logs, clear occupied-port guidance, and clean Ctrl+C child shutdown.
+- **Delete vs close clarity**: field settings now separate non-destructive close from destructive delete (`Close settings` + trash-icon `Delete field`).
+- **Builder/renderer layout consistency**: improved control width consistency and responsive grid-span behavior to reduce tile/control mismatch.
+- **Preview vs real entry**: `Fill out` remains real submission; added explicit renderer `preview` mode with `Check preview` messaging and no submit/upload side effects.
+- **Clearer field configuration**: replaced dependency free-text field IDs with a field-label picker; added host-provided source metadata (`name`/`description`) support to show friendly source labels while retaining technical IDs.
+- **Example connection-failure diagnosis**: hardened minimal example init path and action gating (ready/connecting/error states, retry, strict-mode-safe init guard, and unique default form naming to avoid duplicate-name startup failures).
+
+Targeted/new automated coverage:
+
+- `packages/form-react/src/integration.test.tsx`
+  - added explicit preview assertion: no persistence side effect (`onSubmit` not called), with truthful preview-only messaging.
+
+Final verification evidence for this pass:
+
+| Command | Result |
+| --- | --- |
+| `npm run build` | PASS across package builds and both example app builds. |
+| `npm run typecheck` | PASS across all workspaces and examples. |
+| `npm test` | PASS with exact counts: `@coderlifenet/form-builder` 5 passed, `@coderlifenet/form-core` 9 passed, `@coderlifenet/form-react` 25 passed, `@coderlifenet/form-server` 19 passed/7 skipped, `@coderlifenet/form-postgres` 6 skipped, `example-minimal` 1 passed. |
+| `npm run test:browser` | PASS: 14 Playwright checks. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:browser:workspace` | PASS: workspace lifecycle flow 1 passed. |
+| `npm run pack:artifacts` | PASS: fresh tarball built (`@coderlifenet/form-builder`). |
+| `npm run verify:consumer` | PASS: single-tarball consumer verification succeeded. |
+
+Acceptance status:
+
+- Human UX acceptance remains pending Chris's hands-on review.
+
 ## Continuation: section authoring + clarity pass (2026-10-13)
 
 Branch: `feat/ui-0.2-integration`.

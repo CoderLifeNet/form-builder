@@ -25,7 +25,7 @@ import {
   Typography
 } from "@coderlifenet/ui-core";
 
-export type RendererMode = "new" | "edit" | "read_only" | "history" | "compact";
+export type RendererMode = "new" | "edit" | "read_only" | "history" | "compact" | "preview";
 
 export type FormRendererProps = {
   definition: FormDefinition;
@@ -56,6 +56,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
   const pendingSubmission = useRef(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string>("");
+  const [previewMessage, setPreviewMessage] = useState<string>("");
   const identityRef = useRef(renderIdentity);
   const operationGeneration = useRef(0);
   const submitController = useRef<AbortController | null>(null);
@@ -92,6 +93,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
     setSourceOptions({});
     setSourceError("");
     setFormError("");
+    setPreviewMessage("");
     setRefresh(0);
   }, [renderIdentity, props.definition, props.initialValues, props.fieldErrors]);
 
@@ -138,7 +140,8 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
     return () => controller.abort();
   }, [valueDependencies, refresh, props.mode, renderIdentity]);
 
-  const editable = props.mode === "new" || props.mode === "edit" || props.mode === "compact";
+  const editable = props.mode === "new" || props.mode === "edit" || props.mode === "compact" || props.mode === "preview";
+  const previewMode = props.mode === "preview";
 
   return (
     <TrackingBoundary id={props.definition.tracking?.id ?? "form"} {...props.definition.tracking} optOut={props.definition.tracking?.optOut ?? !props.definition.tracking}>
@@ -193,7 +196,14 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
         setErrors(fieldErrorsToMap(fieldErrors));
         if (fieldErrors.length > 0) {
           setFormError("Check highlighted fields and retry.");
+          setPreviewMessage("");
           document.getElementById(`${instanceId}-${fieldErrors[0].fieldId}`)?.focus();
+          return;
+        }
+
+        if (previewMode) {
+          setFormError("");
+          setPreviewMessage("Preview check passed. Responses are not saved in preview mode.");
           return;
         }
 
@@ -206,6 +216,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
             return;
           }
           setFormError("");
+          setPreviewMessage("");
         } catch (error) {
           if (!sameIdentity()) {
             return;
@@ -214,6 +225,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
           if (Array.isArray(fieldErrors)) setErrors(fieldErrorsToMap(fieldErrors));
           const status = (error as { status?: number })?.status;
           setFormError(status === 401 ? "Your session expired. Sign in again; your entries are preserved." : status === 403 ? "Your permission changed. Your entries are preserved; request access before retrying." : "Submission failed. Your entries are preserved.");
+          setPreviewMessage("");
         }
         } finally {
           if (submitController.current === controller) {
@@ -231,13 +243,15 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
       <Typography id={formHelpId}>{[props.definition.accessibility?.description, props.definition.accessibility?.instructions].filter(Boolean).join(" ")}</Typography>
       {sourceError && <Alert severity="error">{sourceError}<Button onClick={() => setRefresh(value => value + 1)}>Retry options</Button></Alert>}
       {props.optionSourceResolver && editable && <Button onClick={() => setRefresh(value => value + 1)}>Refresh options</Button>}
+      {previewMode ? <Alert severity="info" sx={{ mb: 1 }}>Preview mode uses the draft renderer only. Responses and uploads are not saved.</Alert> : null}
       {formError ? <Alert severity="error" sx={{ mb: 1 }}>{formError}</Alert> : null}
+      {previewMessage ? <Alert severity="success" sx={{ mb: 1 }}>{previewMessage}</Alert> : null}
       {[...props.definition.sections]
         .sort((a, b) => a.order - b.order)
         .map((section) => (
           <Box key={section.id} component="fieldset" sx={{ mb: 1.5, border: 0, p: 0, m: 0 }}>
             <Typography variant="h6" component="legend" sx={{ mb: 1 }}>{section.title}</Typography>
-            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 1.5 }}>
+            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 1 }}>
               {(fieldsBySection.get(section.id) ?? []).map((field) => {
                 const state = deriveFieldState(props.definition, field.id, values);
                 if (!state.visible) {
@@ -259,7 +273,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                   {(() => {
 
                 if (field.type === "single_file" || field.type === "multi_file") {
-                  return <FileField id={inputId} label={label} multiple={field.type === "multi_file"} disabled={disabled || readOnly} required={state.required} value={value} error={error} upload={props.uploadFile ? (_id,file,signal,progress) => props.uploadFile!(field.id,file,signal,progress) : undefined} onChange={value => setFieldValue(field.id,value,setValues)} />;
+                  return <FileField id={inputId} label={label} multiple={field.type === "multi_file"} disabled={disabled || readOnly} required={state.required} value={value} error={error} upload={props.uploadFile && !previewMode ? (_id,file,signal,progress) => props.uploadFile!(field.id,file,signal,progress) : undefined} onChange={value => { setPreviewMessage(""); setFieldValue(field.id,value,setValues); }} />;
                 }
                 if (field.type === "multiline") {
                   return (
@@ -275,7 +289,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                       disabled={disabled}
                       slotProps={{ htmlInput: { readOnly, ...inputA11y }, formHelperText: { id: helperId } }}
                       value={String(value ?? "")}
-                      onChange={(event) => setFieldValue(field.id, event.target.value, setValues)}
+                      onChange={(event) => { setPreviewMessage(""); setFieldValue(field.id, event.target.value, setValues); }}
                       onBlur={() => setErrors(previous => { const next = { ...previous }; delete next[field.id]; return { ...next, ...fieldErrorsToMap(validateRecordPayload(props.definition, values).filter(error => error.fieldId === field.id)) }; })}
                       helperText={helpText}
                       error={Boolean(error)}
@@ -288,7 +302,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                   const selected = field.type === "single_select" || field.type === "radio" ? String(value ?? "") : ((value ?? []) as string[]);
                   if (field.type === "radio") {
                     return (
-                      <FormControl key={field.id} sx={{ gridColumn: { xs: "span 12", sm: `span ${field.width}` } }} error={Boolean(error)} disabled={disabled}>
+                      <FormControl key={field.id} fullWidth sx={{ gridColumn: { xs: "span 12", sm: `span ${field.width}` } }} error={Boolean(error)} disabled={disabled}>
                         <Typography id={`${inputId}-label`} component="label" variant="body2" sx={{ fontWeight: 600, mb: 0.5 }}>
                           {label}
                         </Typography>
@@ -296,7 +310,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                           aria-labelledby={`${inputId}-label`}
                           name={inputId}
                           value={selected}
-                          onChange={(event) => setFieldValue(field.id, event.target.value, setValues)}
+                          onChange={(event) => { setPreviewMessage(""); setFieldValue(field.id, event.target.value, setValues); }}
                         >
                           {options.map((option) => (
                             <FormControlLabel
@@ -313,9 +327,10 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                     );
                   }
                   return (
-                    <FormControl key={field.id} sx={{ gridColumn: { xs: "span 12", sm: `span ${field.width}` } }} error={Boolean(error)} disabled={disabled}>
+                    <FormControl key={field.id} fullWidth sx={{ gridColumn: { xs: "span 12", sm: `span ${field.width}` } }} error={Boolean(error)} disabled={disabled}>
                       <InputLabel id={`${inputId}-label`}>{label}</InputLabel>
                       <Select
+                        fullWidth
                         labelId={`${inputId}-label`}
                         label={label}
                       required={state.required}
@@ -325,12 +340,14 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                         value={field.type === "single_select" ? selected : selected}
                         onChange={(event) => {
                           if (field.type === "single_select") {
+                            setPreviewMessage("");
                             setFieldValue(field.id, event.target.value, setValues);
                             return;
                           }
                           const multiValues = Array.isArray(event.target.value)
                             ? event.target.value
                             : String(event.target.value).split(",").filter(Boolean);
+                          setPreviewMessage("");
                           setFieldValue(field.id, multiValues, setValues);
                         }}
                       >
@@ -359,7 +376,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                             slotProps={{ input: inputA11y }}
                             checked={Boolean(value)}
                             disabled={disabled || readOnly}
-                            onChange={(event) => setFieldValue(field.id, event.target.checked, setValues)}
+                            onChange={(event) => { setPreviewMessage(""); setFieldValue(field.id, event.target.checked, setValues); }}
                           />
                         }
                       />
@@ -370,6 +387,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
 
                 return (
                   <TextField
+                    fullWidth
                     key={field.id}
                     sx={{ gridColumn: { xs: "span 12", sm: `span ${field.width}` } }}
                       id={inputId}
@@ -383,9 +401,11 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
                       onChange={(event) => {
                         if (field.type === "number") {
                           const parsed = Number(event.target.value);
+                          setPreviewMessage("");
                           setFieldValue(field.id, Number.isNaN(parsed) ? event.target.value : parsed, setValues);
                           return;
                         }
+                        setPreviewMessage("");
                         setFieldValue(field.id, event.target.value, setValues);
                       }}
                       onBlur={() => setErrors(previous => { const next = { ...previous }; delete next[field.id]; return { ...next, ...fieldErrorsToMap(validateRecordPayload(props.definition, values).filter(error => error.fieldId === field.id)) }; })}
@@ -398,7 +418,7 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
               </Box>
             </Box>
         ))}
-        {editable ? <Button type="submit" variant="contained" disabled={submitting}>{submitting ? "Submitting…" : "Submit"}</Button> : null}
+        {editable ? <Button type="submit" variant="contained" disabled={submitting}>{submitting ? "Submitting..." : previewMode ? "Check preview" : "Submit"}</Button> : null}
       </Box>
     </TrackingBoundary>
   );

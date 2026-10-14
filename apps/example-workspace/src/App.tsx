@@ -4,7 +4,7 @@ import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, F
 import type { FormDefinition } from "@coderlifenet/form-builder/core";
 import { Alert, Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
-type View = "manager" | "builder" | "capture" | "history" | "settings" | "submissions" | "readOnly";
+type View = "manager" | "builder" | "capture" | "preview" | "history" | "settings" | "submissions" | "readOnly";
 
 type ApiForm = {
   id: string;
@@ -73,7 +73,13 @@ type ApiBinding = {
   formId: string;
 } | null;
 
-const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://localhost:4010";
+const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://127.0.0.1:4010";
+const sourceMetadata = {
+  "profile.first_name": { name: "Current user first name", description: "Provided by host identity profile." },
+  "profile.last_name": { name: "Current user last name", description: "Provided by host identity profile." },
+  "request.categories": { name: "Request categories", description: "Host-provided list of allowed categories." },
+  "request.title_hint": { name: "Request title hint", description: "Optional host-generated title helper." }
+} as const;
 
 const starterDefinition: FormDefinition = {
   metadata: {
@@ -464,6 +470,15 @@ export function App(): ReactElement {
         <Button type="button" variant={view === "manager" ? "contained" : "outlined"} onClick={() => setView("manager")}>Forms</Button>
         <Button type="button" variant={view === "builder" ? "contained" : "outlined"} onClick={() => activeId && openBuilder(activeId)}>Design form</Button>
         <Button type="button" variant={view === "capture" ? "contained" : "outlined"} onClick={() => activeId && openCapture(activeId)}>Fill out form</Button>
+        <Button type="button" variant={view === "preview" ? "contained" : "outlined"} onClick={async () => {
+          if (!activeId) {
+            setStatus("Open a form first.");
+            return;
+          }
+          const draft = await api<ApiDraft>(`/api/forms/${activeId}/draft`);
+          setActiveDraft(draft);
+          setView("preview");
+        }}>Preview draft</Button>
         <Button type="button" variant={view === "submissions" ? "contained" : "outlined"} onClick={async () => {
           setView("submissions");
           await loadSubmissions(true);
@@ -712,6 +727,7 @@ export function App(): ReactElement {
           <FormBuilder
             initialDefinition={activeDraft.definition}
             sourceCapabilities={sourceCapabilities}
+            sourceMetadata={sourceMetadata}
             onSaved={() => setView("manager")}
             onReloadDraft={async () => { const draft = await api<ApiDraft>(`/api/forms/${activeId}/draft`); draftRevision.current = draft.revision; setActiveDraft(draft); return draft.definition; }}
             onSaveDraft={async (nextDefinition) => {
@@ -742,6 +758,19 @@ export function App(): ReactElement {
             }}
           />
           </Box>
+        ) : null}
+
+        {view === "preview" && activeDraft ? (
+          <Stack spacing={1.5}>
+            <Typography variant="h6">Draft preview (no persistence)</Typography>
+            <Typography variant="caption" color="text.secondary">This preview uses the draft renderer and never saves responses or uploads.</Typography>
+            <FormRenderer
+              key={`preview:${activeDraft.definition.metadata.formId}`}
+              renderIdentity={`preview:${sessionTenantId}:${activeDraft.definition.metadata.formId}`}
+              definition={activeDraft.definition}
+              mode="preview"
+            />
+          </Stack>
         ) : null}
 
         {view === "capture" && activeDefinition && activeId ? (

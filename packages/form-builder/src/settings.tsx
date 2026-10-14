@@ -9,7 +9,7 @@ export function TrackingEditor({ value, onChange, form = false }: { value?: Trac
   const update = (patch: Partial<TrackingSettings>) => onChange({ id: value?.id ?? createStableId("tracking"), ...value, ...patch });
   return <Stack spacing={1}>
     <Typography variant="subtitle2">Advanced analytics metadata</Typography>
-    <Typography variant="caption" color="text.secondary">Use these settings only when your host analytics model needs explicit IDs or narrowed event delivery.</Typography>
+    <Typography variant="caption" color="text.secondary">Most authors can leave analytics defaults unchanged. Use these only when your host analytics model needs explicit IDs or narrowed event delivery.</Typography>
     <FormControlLabel label={form ? "Enable analytics events for this form" : "Turn off analytics events for this field"} control={<Switch checked={form ? Boolean(value && !value.optOut) : Boolean(value?.optOut)} onChange={(_, checked) => update({ optOut: form ? !checked : checked })} />} />
     <TextField label="Semantic analytics ID" helperText="Example: request-title-control" value={value?.semanticId ?? ""} onChange={e => update({ semanticId: e.target.value || undefined })} />
     <TextField select label="Event delivery" value={value?.events === undefined ? "inherit" : "selected"} onChange={e => update({ events: e.target.value === "inherit" ? undefined : [] })} slotProps={{ select: { native: true } }}><option value="inherit">Use host default events</option><option value="selected">Choose specific events</option></TextField>
