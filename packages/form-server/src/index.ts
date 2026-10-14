@@ -4,7 +4,7 @@ import cookieParser from "cookie-parser";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import morgan from "morgan";
-import { compareDefinitions, createStableId, validateDefinition, ValidationError } from "@coderlifenet/form-core";
+import { compareDefinitions, createStableId, FormDefinition, validateDefinition, ValidationError } from "@coderlifenet/form-core";
 import { FormRepository, makePool } from "@coderlifenet/form-postgres";
 import { z } from "zod";
 import { getDevSessionContext, getDevUserCapabilities, registerDevAuthRoutes } from "./auth/dev-session.js";
@@ -57,6 +57,14 @@ const createFormSchema = z.object({
 });
 
 const publishSchema = z.object({
+  expectedRevision: z.number().int().positive()
+});
+
+const duplicateFormSchema = z.object({
+  name: z.string().min(1).optional()
+});
+
+const draftLifecycleMutationSchema = z.object({
   expectedRevision: z.number().int().positive()
 });
 
@@ -371,6 +379,7 @@ export function createFormServer(options?: {
     try {
       const ctx = await policyAdapter.resolveContext(req);
       await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
+      const payload = duplicateFormSchema.parse(req.body ?? {});
 
       const form = await repository.getFormById({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
       if (!form) {
@@ -378,19 +387,26 @@ export function createFormServer(options?: {
         return;
       }
 
-      const draft = await repository.getDraft({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
-      if (!draft) {
+      const latestPublished = await repository.getLatestPublishedDefinitionByForm({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId);
+      const sourceDefinition = latestPublished
+        ? definitionFromPublished(latestPublished.definition)
+        : (await repository.getDraft({ tenantId: ctx.tenantId, actorId: ctx.actorId }, req.params.formId))?.definition;
+      if (!sourceDefinition) {
         res.status(404).json(errorEnvelope("DRAFT_NOT_FOUND", "Draft not found"));
         return;
       }
 
-      const duplicated = remapDefinitionStableIds(draft.definition);
-      duplicated.metadata.name = `${draft.definition.metadata.name} copy`;
+      const duplicated = remapDefinitionStableIds(sourceDefinition);
+      const requestedName = payload.name?.trim();
+      const duplicateName = requestedName && requestedName.length > 0
+        ? requestedName
+        : `${form.name} copy`;
+      duplicated.metadata.name = duplicateName;
       const created = await repository.createForm(
         { tenantId: ctx.tenantId, actorId: ctx.actorId },
         {
           id: createStableId("form"),
-          name: `${form.name} copy`,
+          name: duplicateName,
           description: form.description ?? undefined,
           draft: duplicated
         }
@@ -546,26 +562,81 @@ export function createFormServer(options?: {
     }
   });
 
+  app.post("/api/forms/:formId/discard-unpublished", async (req, res, next) => {
+    try {
+      const ctx = await policyAdapter.resolveContext(req);
+      await requireCapability(policyAdapter, ctx, "forms.design", { formId: req.params.formId });
+      const payload = draftLifecycleMutationSchema.parse(req.body);
+      const saved = await repository.discardUnpublishedChanges(
+        { tenantId: ctx.tenantId, actorId: ctx.actorId },
+        req.params.formId,
+        payload.expectedRevision
+      );
+      res.status(200).json(saved);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/forms/:formId/draft", async (req, res, next) => {
+    try {
+      const ctx = await policyAdapter.resolveContext(req);
+      await requireCapability(policyAdapter, ctx, "forms.delete", { formId: req.params.formId });
+      const payload = draftLifecycleMutationSchema.parse(req.body);
+      await repository.deleteDraftOnlyForm(
+        { tenantId: ctx.tenantId, actorId: ctx.actorId },
+        req.params.formId,
+        payload.expectedRevision
+      );
+      res.status(204).end();
+    } catch (error) {
+      next(error);
+    }
+  });
+
   app.post("/api/forms/:formId/publish", async (req, res, next) => {
     try {
       const ctx = await policyAdapter.resolveContext(req);
       await requireCapability(policyAdapter, ctx, "forms.publish", { formId: req.params.formId });
       const payload = publishSchema.parse(req.body);
-      const draft = await repository.getDraft(ctx, req.params.formId);
-      if (!draft) throw new Error("FORM_NOT_FOUND");
-      const capabilities = await sourceRegistry.capabilities?.(ctx) ?? {};
-      const unresolved = draft.definition.fields.flatMap(field => field.source && capabilities[field.source.id] !== field.source.version ? [field.source.id] : []);
-      const undeclared = Object.entries(draft.definition.dependencyVersions).filter(([id, version]) => capabilities[id] !== version).map(([id]) => id);
-      if (unresolved.length || undeclared.length) {
-        res.status(422).json({ ...errorEnvelope("DEPENDENCIES_UNRESOLVED", "Reconnect, replace, or remove incompatible dependencies before publishing."), dependencies: [...new Set([...unresolved, ...undeclared])] });
+      const idempotencyKey = req.header("idempotency-key");
+      const publish = async () => {
+        const draft = await repository.getDraft(ctx, req.params.formId);
+        if (!draft) throw new Error("FORM_NOT_FOUND");
+        const capabilities = await sourceRegistry.capabilities?.(ctx) ?? {};
+        const unresolved = draft.definition.fields.flatMap(field => field.source && capabilities[field.source.id] !== field.source.version ? [field.source.id] : []);
+        const undeclared = Object.entries(draft.definition.dependencyVersions).filter(([id, version]) => capabilities[id] !== version).map(([id]) => id);
+        if (unresolved.length || undeclared.length) {
+          return {
+            statusCode: 422,
+            response: {
+              ...errorEnvelope("DEPENDENCIES_UNRESOLVED", "Reconnect, replace, or remove incompatible dependencies before publishing."),
+              dependencies: [...new Set([...unresolved, ...undeclared])]
+            }
+          };
+        }
+        const published = await repository.publishDraft(
+          { tenantId: ctx.tenantId, actorId: ctx.actorId },
+          req.params.formId,
+          payload.expectedRevision
+        );
+        return { statusCode: 201, response: published };
+      };
+
+      if (idempotencyKey) {
+        const replay = await repository.withIdempotency(
+          { tenantId: ctx.tenantId, actorId: ctx.actorId },
+          "forms.publish",
+          idempotencyKey,
+          { formId: req.params.formId, ...payload },
+          async () => publish()
+        );
+        res.status(replay.statusCode).json(replay.response);
         return;
       }
-      const published = await repository.publishDraft(
-        { tenantId: ctx.tenantId, actorId: ctx.actorId },
-        req.params.formId,
-        payload.expectedRevision
-      );
-      res.status(201).json(published);
+
+      const published = await publish();
+      res.status(published.statusCode).json(published.response);
     } catch (error) {
       next(error);
     }
@@ -740,6 +811,22 @@ export function createFormServer(options?: {
               statusCode: 400,
               response: errorEnvelope("DEFINITION_NOT_FOUND", "Published definition not found")
             };
+          }
+
+          if (!payload.recordId) {
+            const form = await repository.getFormById(ctx, payload.formId);
+            if (!form) {
+              return {
+                statusCode: 404,
+                response: errorEnvelope("FORM_NOT_FOUND", "Form not found")
+              };
+            }
+            if (form.archived) {
+              return {
+                statusCode: 409,
+                response: errorEnvelope("FORM_ARCHIVED", "This form is archived and cannot accept new responses.")
+              };
+            }
           }
 
           const resolved = await applyDefinitionSources(definitionResult.definition, payload.values, async (sourceId, values) =>
@@ -1065,6 +1152,18 @@ export function createFormServer(options?: {
         res.status(409).json(errorEnvelope(error.message, message));
         return;
       }
+      if (error.message === "NO_UNPUBLISHED_CHANGES") {
+        res.status(409).json(errorEnvelope("NO_UNPUBLISHED_CHANGES", "There are no unpublished changes to publish."));
+        return;
+      }
+      if (error.message === "NO_PUBLISHED_VERSION") {
+        res.status(409).json(errorEnvelope("NO_PUBLISHED_VERSION", "This form has no published version to discard back to."));
+        return;
+      }
+      if (error.message === "FORM_ARCHIVED") {
+        res.status(409).json(errorEnvelope("FORM_ARCHIVED", "This form is archived and cannot accept new responses."));
+        return;
+      }
       if (error.message === "IDEMPOTENCY_PAYLOAD_MISMATCH") {
         res.status(409).json(
           errorEnvelope(
@@ -1135,6 +1234,13 @@ function errorEnvelope(code: string, message: string, fieldErrors?: ValidationEr
     message,
     fieldErrors: fieldErrors ?? []
   };
+}
+
+function definitionFromPublished(definition: unknown): FormDefinition {
+  const cloned = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+  delete cloned.publicationVersion;
+  delete cloned.publishedAt;
+  return validateDefinition(cloned);
 }
 
 export type FormServer = ReturnType<typeof createFormServer>;

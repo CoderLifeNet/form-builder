@@ -14,6 +14,8 @@ type ApiForm = {
   draftRevision: number | null;
   publishedVersion: number | null;
   publishedDefinitionId: string | null;
+  hasUnpublishedChanges: boolean;
+  lifecycleState: "unpublished_new" | "published_clean" | "published_with_unpublished_changes" | "archived";
 };
 
 type ApiDraft = {
@@ -225,10 +227,15 @@ export function App(): ReactElement {
         description: form.description ?? undefined,
         archived: form.archived,
         publishedVersion: form.publishedVersion ?? undefined,
-        hasDraft: form.draftRevision !== null,
+        hasUnpublishedChanges: form.hasUnpublishedChanges,
         definition: activeDraft?.definition ?? starterDefinition
       })),
     [forms, activeDraft]
+  );
+
+  const activeForm = useMemo(
+    () => forms.find((form) => form.id === activeId) ?? null,
+    [forms, activeId]
   );
 
   async function login(userId: string, tenantId: string): Promise<void> {
@@ -545,9 +552,19 @@ export function App(): ReactElement {
               }}
               onDuplicate={(formId) => {
                 void (async () => {
-                  await api(`/api/forms/${formId}/duplicate`, { method: "POST" });
+                  const target = forms.find((form) => form.id === formId);
+                  const suggestion = target ? `${target.name} copy` : "Copied form";
+                  const requestedName = window.prompt("Name for the duplicated form", suggestion);
+                  if (!requestedName?.trim()) {
+                    return;
+                  }
+                  const duplicated = await api<{ formId: string }>(`/api/forms/${formId}/duplicate`, {
+                    method: "POST",
+                    body: JSON.stringify({ name: requestedName.trim() })
+                  });
                   await refreshForms();
-                  setStatus("Form duplicated");
+                  await openBuilder(duplicated.formId);
+                  setStatus("Independent draft copy opened");
                 })();
               }}
               onExport={(formId) => {
@@ -572,6 +589,60 @@ export function App(): ReactElement {
                   await api(`/api/forms/${formId}/${target.archived ? "restore" : "archive"}`, { method: "POST" });
                   await refreshForms();
                   setStatus(target.archived ? "Form restored" : "Form archived");
+                })();
+              }}
+              onOpenVersionHistory={(formId) => {
+                void (async () => {
+                  setActiveId(formId);
+                  await loadPublishedVersions(formId);
+                  setView("settings");
+                  setStatus("Viewing published form versions");
+                })();
+              }}
+              onDeleteDraft={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  if (!target || target.publishedVersion || target.draftRevision === null) {
+                    return;
+                  }
+                  const confirmed = window.confirm("Delete draft?\n\nThis removes this never-published draft form. Published versions and responses do not exist for this form.");
+                  if (!confirmed) {
+                    return;
+                  }
+                  await api(`/api/forms/${formId}/draft`, {
+                    method: "DELETE",
+                    body: JSON.stringify({ expectedRevision: target.draftRevision })
+                  });
+                  if (activeId === formId) {
+                    clearPrivateViewState();
+                    setView("manager");
+                    setActiveId(null);
+                  }
+                  await refreshForms();
+                  setStatus("Draft-only form deleted");
+                })();
+              }}
+              onDiscardUnpublishedChanges={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  if (!target || !target.publishedVersion || !target.hasUnpublishedChanges || target.draftRevision === null) {
+                    return;
+                  }
+                  const confirmed = window.confirm("Discard unpublished changes?\n\nThis removes only the working draft changes and keeps published versions, responses, and history.");
+                  if (!confirmed) {
+                    return;
+                  }
+                  const discarded = await api<{ revision: number }>(`/api/forms/${formId}/discard-unpublished`, {
+                    method: "POST",
+                    body: JSON.stringify({ expectedRevision: target.draftRevision })
+                  });
+                  if (activeId === formId) {
+                    const draft = await api<ApiDraft>(`/api/forms/${formId}/draft`);
+                    draftRevision.current = discarded.revision;
+                    setActiveDraft(draft);
+                  }
+                  await refreshForms();
+                  setStatus("Unpublished changes discarded");
                 })();
               }}
               onImportAsNew={() => {
@@ -756,6 +827,9 @@ export function App(): ReactElement {
               await refreshForms();
               setStatus(`Published v${published.publicationVersion}`);
             }}
+            publishedVersion={activeForm?.publishedVersion ?? undefined}
+            archived={activeForm?.archived ?? false}
+            hasUnpublishedChanges={activeForm?.hasUnpublishedChanges ?? false}
           />
           </Box>
         ) : null}

@@ -94,6 +94,8 @@ export class FormRepository {
     draftRevision: number | null;
     publishedVersion: number | null;
     publishedDefinitionId: string | null;
+    hasUnpublishedChanges: boolean;
+    lifecycleState: "unpublished_new" | "published_clean" | "published_with_unpublished_changes" | "archived";
   }>> {
     const includeArchived = options?.includeArchived ?? false;
     const result = await this.pool.query(
@@ -105,11 +107,15 @@ export class FormRepository {
         f.archived,
         d.revision AS draft_revision,
         pd.publication_version AS published_version,
-        pd.id AS published_definition_id
+        pd.id AS published_definition_id,
+        CASE
+          WHEN pd.id IS NULL THEN true
+          ELSE (pd.definition_json - 'publicationVersion' - 'publishedAt') <> d.definition_json
+        END AS has_unpublished_changes
       FROM forms f
       LEFT JOIN form_drafts d ON d.form_id = f.id
       LEFT JOIN LATERAL (
-        SELECT id, publication_version
+        SELECT id, publication_version, definition_json
         FROM published_definitions p
         WHERE p.form_id = f.id
         ORDER BY publication_version DESC
@@ -129,7 +135,15 @@ export class FormRepository {
       archived: Boolean(row.archived),
       draftRevision: row.draft_revision === null ? null : Number(row.draft_revision),
       publishedVersion: row.published_version === null ? null : Number(row.published_version),
-      publishedDefinitionId: row.published_definition_id
+      publishedDefinitionId: row.published_definition_id,
+      hasUnpublishedChanges: Boolean(row.has_unpublished_changes),
+      lifecycleState: row.archived
+        ? "archived"
+        : row.published_version === null
+          ? "unpublished_new"
+          : row.has_unpublished_changes
+            ? "published_with_unpublished_changes"
+            : "published_clean"
     }));
   }
 
@@ -141,6 +155,8 @@ export class FormRepository {
     draftRevision: number | null;
     publishedVersion: number | null;
     publishedDefinitionId: string | null;
+    hasUnpublishedChanges: boolean;
+    lifecycleState: "unpublished_new" | "published_clean" | "published_with_unpublished_changes" | "archived";
   } | null> {
     const result = await this.pool.query(
       `
@@ -151,11 +167,15 @@ export class FormRepository {
         f.archived,
         d.revision AS draft_revision,
         pd.publication_version AS published_version,
-        pd.id AS published_definition_id
+        pd.id AS published_definition_id,
+        CASE
+          WHEN pd.id IS NULL THEN true
+          ELSE (pd.definition_json - 'publicationVersion' - 'publishedAt') <> d.definition_json
+        END AS has_unpublished_changes
       FROM forms f
       LEFT JOIN form_drafts d ON d.form_id = f.id
       LEFT JOIN LATERAL (
-        SELECT id, publication_version
+        SELECT id, publication_version, definition_json
         FROM published_definitions p
         WHERE p.form_id = f.id
         ORDER BY publication_version DESC
@@ -180,7 +200,15 @@ export class FormRepository {
       archived: Boolean(row.archived),
       draftRevision: row.draft_revision === null ? null : Number(row.draft_revision),
       publishedVersion: row.published_version === null ? null : Number(row.published_version),
-      publishedDefinitionId: row.published_definition_id
+      publishedDefinitionId: row.published_definition_id,
+      hasUnpublishedChanges: Boolean(row.has_unpublished_changes),
+      lifecycleState: row.archived
+        ? "archived"
+        : row.published_version === null
+          ? "unpublished_new"
+          : row.has_unpublished_changes
+            ? "published_with_unpublished_changes"
+            : "published_clean"
     };
   }
 
@@ -408,7 +436,7 @@ export class FormRepository {
 
       const draftRes = await client.query(
         `
-        SELECT d.definition_json, d.revision
+        SELECT d.definition_json, d.revision, f.archived
         FROM form_drafts d
         JOIN forms f ON f.id = d.form_id
         WHERE d.form_id = $1
@@ -421,8 +449,29 @@ export class FormRepository {
         throw new Error("FORM_NOT_FOUND");
       }
       const draft = draftRes.rows[0];
+      if (draft.archived) {
+        throw new Error("FORM_ARCHIVED");
+      }
       if (draft.revision !== expectedDraftRevision) {
         throw new Error("DRAFT_CONFLICT");
+      }
+
+      const latestPublished = await client.query(
+        `
+        SELECT definition_json
+        FROM published_definitions
+        WHERE form_id = $1
+        ORDER BY publication_version DESC
+        LIMIT 1
+      `,
+        [formId]
+      );
+      if (latestPublished.rowCount) {
+        const currentDraftHash = hashPayload(validateDefinition(draft.definition_json));
+        const latestPublishedHash = hashPayload(normalizePublishedDefinition(latestPublished.rows[0].definition_json));
+        if (currentDraftHash === latestPublishedHash) {
+          throw new Error("NO_UNPUBLISHED_CHANGES");
+        }
       }
 
       const versionRes = await client.query(
@@ -455,6 +504,48 @@ export class FormRepository {
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  async discardUnpublishedChanges(
+    ctx: DbContext,
+    formId: string,
+    expectedDraftRevision: number
+  ): Promise<{ revision: number }> {
+    const latest = await this.getLatestPublishedDefinitionByForm(ctx, formId);
+    if (!latest) {
+      throw new Error("NO_PUBLISHED_VERSION");
+    }
+
+    const normalized = normalizePublishedDefinition(latest.definition);
+    return this.saveDraft(ctx, formId, expectedDraftRevision, normalized);
+  }
+
+  async deleteDraftOnlyForm(
+    ctx: DbContext,
+    formId: string,
+    expectedDraftRevision: number
+  ): Promise<void> {
+    const result = await this.pool.query(
+      `
+      DELETE FROM forms f
+      USING form_drafts d
+      WHERE f.id = d.form_id
+        AND f.id = $1
+        AND f.tenant_id = $2
+        AND d.revision = $3
+        AND NOT EXISTS (
+          SELECT 1
+          FROM published_definitions p
+          WHERE p.form_id = f.id
+        )
+      RETURNING f.id
+    `,
+      [formId, ctx.tenantId, expectedDraftRevision]
+    );
+
+    if (!result.rowCount) {
+      throw new Error("DRAFT_CONFLICT");
     }
   }
 
@@ -1088,4 +1179,11 @@ export function makePool(connectionString = process.env.FORM_DB_URL): Pool {
 function hashPayload(payload: unknown): string {
   const raw = JSON.stringify(payload);
   return createHash("sha256").update(raw).digest("hex");
+}
+
+function normalizePublishedDefinition(definition: unknown): FormDefinition {
+  const cloned = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+  delete cloned.publicationVersion;
+  delete cloned.publishedAt;
+  return validateDefinition(cloned);
 }

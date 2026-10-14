@@ -27,7 +27,7 @@ export type ManagedForm = {
   description?: string;
   archived: boolean;
   publishedVersion?: number;
-  hasDraft: boolean;
+  hasUnpublishedChanges: boolean;
   definition: FormDefinition;
 };
 
@@ -57,6 +57,9 @@ export function FormManager(props: {
   onDuplicate: (formId: string) => void;
   onExport: (formId: string) => void;
   onArchiveToggle: (formId: string) => void;
+  onOpenVersionHistory: (formId: string) => void;
+  onDeleteDraft: (formId: string) => void;
+  onDiscardUnpublishedChanges: (formId: string) => void;
   onImportAsNew: () => void;
 }): ReactElement {
   const [query, setQuery] = useState("");
@@ -69,7 +72,7 @@ export function FormManager(props: {
         return false;
       }
       if (status === "draft") {
-        return form.hasDraft;
+        return form.hasUnpublishedChanges;
       }
       if (status === "archived") {
         return form.archived;
@@ -142,11 +145,20 @@ export function FormManager(props: {
                 form.archived
                   ? "Archived"
                   : form.publishedVersion
-                    ? `Published v${form.publishedVersion}${form.hasDraft ? " with draft changes" : ""}`
-                    : "Draft only"
+                    ? form.hasUnpublishedChanges
+                      ? `Published v${form.publishedVersion} with unpublished changes`
+                      : `Published v${form.publishedVersion} with no unpublished changes`
+                    : "Unpublished draft"
               }
             />
             <Stack direction="row" spacing={0.5} sx={{ justifyContent: { xs: "flex-start", md: "flex-end" } }}>
+              {form.publishedVersion ? (
+                <Tooltip title="Version history">
+                  <IconButton aria-label="Version history" type="button" size="small" onClick={() => props.onOpenVersionHistory(form.id)}>
+                    🕘
+                  </IconButton>
+                </Tooltip>
+              ) : null}
               <Tooltip title="Duplicate">
                 <IconButton aria-label="Duplicate" type="button" size="small" onClick={() => props.onDuplicate(form.id)}>
                   ⧉
@@ -167,6 +179,16 @@ export function FormManager(props: {
                   {form.archived ? "↺" : "🗄"}
                 </IconButton>
               </Tooltip>
+              {!form.publishedVersion ? (
+                <Button type="button" size="small" color="error" onClick={() => props.onDeleteDraft(form.id)}>
+                  Delete draft
+                </Button>
+              ) : null}
+              {form.publishedVersion && form.hasUnpublishedChanges ? (
+                <Button type="button" size="small" onClick={() => props.onDiscardUnpublishedChanges(form.id)}>
+                  Discard unpublished changes
+                </Button>
+              ) : null}
             </Stack>
           </Paper>
         ))}
@@ -185,6 +207,9 @@ export function FormBuilder(props: {
   sourceCapabilities?: Record<string, string>;
   sourceMetadata?: Record<string, { name?: string; description?: string }>;
   onDefinitionChange?: (definition: FormDefinition) => void;
+  publishedVersion?: number;
+  archived?: boolean;
+  hasUnpublishedChanges?: boolean;
 }): ReactElement {
   const [definition, setDefinition] = useState<FormDefinition>(props.initialDefinition);
   const [selectedFieldId, setSelectedFieldId] = useState<string | null>(props.initialDefinition.fields[0]?.id ?? null);
@@ -223,6 +248,16 @@ export function FormBuilder(props: {
       })
       .filter((entry) => entry.availableVersion !== entry.expectedVersion);
   }, [definition.dependencyVersions, definition.fields, props.sourceCapabilities]);
+
+  const hasLocalUnsavedChanges = JSON.stringify(definition) !== savedSnapshot.current;
+  const hasUnpublishedChanges = !props.publishedVersion || props.hasUnpublishedChanges || hasLocalUnsavedChanges;
+  const publishBlockedReason = props.archived
+    ? "This form is archived. Restore it before publishing."
+    : unresolvedDependencies.length > 0
+      ? "Resolve host-data mismatches before publishing."
+      : props.publishedVersion && !hasUnpublishedChanges
+        ? "There are no unpublished changes to publish."
+        : "";
 
   useEffect(() => {
     formId.current = props.initialDefinition.metadata.formId;
@@ -608,7 +643,21 @@ export function FormBuilder(props: {
     return operation;
   };
   const saveDraft = () => persist(false, true);
-  const publishDraft = () => persist(true, false);
+  const publishDraft = () => {
+    if (publishBlockedReason) {
+      setSaveMessage(publishBlockedReason);
+      return Promise.resolve();
+    }
+    if (props.publishedVersion && hasUnpublishedChanges) {
+      const confirmed = window.confirm(
+        "Publish a new version?\n\nNew responses will use this version. Previous versions and their responses will remain available."
+      );
+      if (!confirmed) {
+        return Promise.resolve();
+      }
+    }
+    return persist(true, false);
+  };
   useEffect(() => {
     callbacks.current.onDefinitionChange?.(definition);
     if (JSON.stringify(definition) === savedSnapshot.current || props.autosaveDelay === false) return;
@@ -648,9 +697,19 @@ export function FormBuilder(props: {
           <Button type="button" variant="outlined" disabled={saveState === "saving" || saveState === "publishing"} onClick={() => void saveDraft()}>
             Save draft
           </Button>
-          <Button type="button" variant="contained" disabled={saveState === "saving" || saveState === "publishing"} onClick={() => void publishDraft()}>
+          <Button
+            type="button"
+            variant="contained"
+            disabled={saveState === "saving" || saveState === "publishing" || Boolean(publishBlockedReason)}
+            onClick={() => void publishDraft()}
+          >
             Publish version
           </Button>
+          {publishBlockedReason ? (
+            <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+              {publishBlockedReason}
+            </Typography>
+          ) : null}
         </Stack>
       </Stack>
       <Box component="details" sx={{ mt: 2 }}>

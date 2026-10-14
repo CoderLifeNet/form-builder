@@ -4,6 +4,62 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: bounded lifecycle correction + local demo reset (2026-10-14)
+
+Branch: `feat/ui-0.2-integration`.
+
+This pass closed the bounded lifecycle correction request and prepared a clean local demo state for Chris's hands-on review.
+
+Implemented lifecycle corrections:
+
+- Server-authoritative publish eligibility: publish now rejects unchanged drafts (`NO_UNPUBLISHED_CHANGES`) and archived forms (`FORM_ARCHIVED`).
+- Publish retry safety: optional idempotent publish replay path via `idempotency-key`.
+- Draft cleanup APIs:
+  - `POST /api/forms/:formId/discard-unpublished` for published forms with local changes.
+  - `DELETE /api/forms/:formId/draft` for never-published draft-only forms.
+- Duplicate behavior: duplicates from latest published definition when present, otherwise from draft.
+- UI lifecycle model alignment: manager/builder now use `hasUnpublishedChanges` + lifecycle state semantics instead of draft-row existence.
+- Minimal host stabilization: local demo startup now reuses the existing demo form identity instead of creating a new form on each reconnect.
+
+Focused/new coverage included in this pass:
+
+- `packages/form-server/src/acceptance.integration.test.ts`
+  - publish eligibility + idempotent retry + no-change republish conflict
+  - archived-form submission/publish denial with history readability
+  - delete/discard lifecycle behavior with stale-save conflict safety
+- `tests/browser/workspace-reference.spec.ts`
+  - version-history discoverability + publish-cancel no-version-increment check
+
+Validation evidence for this pass:
+
+| Command | Result |
+| --- | --- |
+| `npm run build` | PASS across package builds and both example app builds. |
+| `npm run typecheck` | PASS across all workspaces and examples. |
+| `npm test` | PASS after fixture updates (`example-minimal` analytics host test adjusted for async initialization flow). |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:integration` | PASS (`@coderlifenet/form-postgres` integration + `@coderlifenet/form-server` acceptance). |
+| `npm run test:browser` | PASS (Playwright suite). |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:browser:workspace` | PASS (workspace lifecycle browser checks). |
+| `npm run pack:artifacts` | PASS (fresh `@coderlifenet/form-builder` tarball). |
+| `npm run verify:consumer` | PASS after updating smoke fixture types for `ManagedForm.hasUnpublishedChanges`. |
+
+Controlled local demo reset executed (authorized scope only):
+
+- Confirmed active local backend process and stopped it before reset.
+- Captured pre-reset local demo DB counts (`formbuilder`): forms 101, records 35, uploads 14, published definitions 58, drafts 101.
+- Truncated only local demo data tables in `formbuilder` (preserved `schema_migrations`; no schema drop).
+- Re-applied migrations with `FORM_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder npm run db:migrate`.
+- Post-reset local demo DB counts (`formbuilder`): forms 0, records 0, uploads 0, published definitions 0, drafts 0, migration rows 2.
+- Verified integration DB boundary untouched (`formbuilder_test` still populated from integration runs).
+- Verified no local upload directory existed in this checkout (`.form_uploads`/`form_uploads` not present), so no filesystem deletion was required.
+- Restarted local demo stack via `npm run dev`.
+  - Workspace URL: `http://127.0.0.1:4175/`
+  - API URL: `http://127.0.0.1:4010`
+
+Acceptance status:
+
+- Human lifecycle/UX acceptance remains pending Chris's hands-on review on the reset local environment.
+
 ## Continuation: hands-on findings implementation closure (2026-10-14)
 
 Branch: `feat/ui-0.2-integration`.

@@ -13,8 +13,24 @@ describe("example minimal host analytics ownership", () => {
       if (url.endsWith("/dev/login") && init?.method === "POST") {
         return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } });
       }
+      if (url.includes("/api/forms?includeArchived=true") && (!init?.method || init.method === "GET")) {
+        return new Response(JSON.stringify([]), { status: 200, headers: { "content-type": "application/json" } });
+      }
       if (url.endsWith("/api/forms") && init?.method === "POST") {
         return new Response(JSON.stringify({ formId: "f_example", draftRevision: 1 }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.endsWith("/api/forms/f_example") && (!init?.method || init.method === "GET")) {
+        return new Response(JSON.stringify({
+          id: "f_example",
+          name: "Minimal test form",
+          description: "Minimal example form (local demo)",
+          archived: false,
+          draftRevision: 1,
+          publishedVersion: null,
+          publishedDefinitionId: null,
+          hasUnpublishedChanges: true,
+          lifecycleState: "unpublished_new"
+        }), { status: 200, headers: { "content-type": "application/json" } });
       }
       return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
     }));
@@ -33,6 +49,7 @@ describe("example minimal host analytics ownership", () => {
       </AnalyticsHost>
     );
 
+    await waitFor(() => expect((screen.getByRole("button", { name: "Fill out form" }) as HTMLButtonElement).disabled).toBe(false));
     await userEvent.click(screen.getByRole("button", { name: "Fill out form" }));
     const title = await screen.findByRole("textbox", { name: /Request title/i });
 

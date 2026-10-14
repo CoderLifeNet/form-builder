@@ -99,6 +99,20 @@ const starterDefinition: FormDefinition = {
 
 const api = createFormApiClient({ baseUrl: apiBase });
 
+type ApiFormSummary = {
+  id: string;
+  name: string;
+  description: string | null;
+  archived: boolean;
+  draftRevision: number | null;
+  publishedVersion: number | null;
+  publishedDefinitionId: string | null;
+  hasUnpublishedChanges: boolean;
+  lifecycleState: "unpublished_new" | "published_clean" | "published_with_unpublished_changes" | "archived";
+};
+
+const minimalDemoDescription = "Minimal example form (local demo)";
+
 export function App(): ReactElement {
   const submissionKey = useRef(createMutationRetryKey());
   const [definition, setDefinition] = useState(starterDefinition);
@@ -112,6 +126,7 @@ export function App(): ReactElement {
   const [definitionId, setDefinitionId] = useState<string>("");
   const [status, setStatus] = useState<string>("Connecting...");
   const [initialized, setInitialized] = useState(false);
+  const [formSummary, setFormSummary] = useState<ApiFormSummary | null>(null);
   const initStarted = useRef(false);
 
   const initialize = async (): Promise<void> => {
@@ -122,20 +137,42 @@ export function App(): ReactElement {
         method: "POST",
         body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
       });
-      const uniqueSuffix = typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID().slice(0, 8)
-        : Math.random().toString(36).slice(2, 10);
-      const created = await api<{ formId: string; draftRevision: number }>("/api/forms", {
-        method: "POST",
-        body: JSON.stringify({
-          name: `Minimal ${new Date().toISOString()} ${uniqueSuffix}`,
-          description: "Minimal example form",
-          definition
-        })
-      });
-      setFormId(created.formId);
-      setDraftRevision(created.draftRevision);
-      setStatus(`Connected as owner1 (${created.formId})`);
+      const existingForms = await api<ApiFormSummary[]>("/api/forms?includeArchived=true");
+      const existing = existingForms.find((form) => !form.archived && form.description === minimalDemoDescription);
+
+      if (existing) {
+        const draft = await api<{ revision: number; definition: FormDefinition }>(`/api/forms/${existing.id}/draft`);
+        setFormId(existing.id);
+        setDraftRevision(draft.revision);
+        setDefinition(draft.definition);
+        setFormSummary(existing);
+        if (existing.publishedDefinitionId) {
+          const published = await api<{ id: string; formId: string; publicationVersion: number; definition: FormDefinition }>(`/api/definitions/${existing.publishedDefinitionId}`);
+          setDefinitionId(published.id);
+          setPublishedDefinition(published.definition);
+        } else {
+          setDefinitionId("");
+          setPublishedDefinition(null);
+        }
+        setStatus(`Connected as owner1 (${existing.id})`);
+      } else {
+        const uniqueSuffix = typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? crypto.randomUUID().slice(0, 8)
+          : Math.random().toString(36).slice(2, 10);
+        const created = await api<{ formId: string; draftRevision: number }>("/api/forms", {
+          method: "POST",
+          body: JSON.stringify({
+            name: `Minimal ${new Date().toISOString()} ${uniqueSuffix}`,
+            description: minimalDemoDescription,
+            definition
+          })
+        });
+        const summary = await api<ApiFormSummary>(`/api/forms/${created.formId}`);
+        setFormId(created.formId);
+        setDraftRevision(created.draftRevision);
+        setFormSummary(summary);
+        setStatus(`Connected as owner1 (${created.formId})`);
+      }
       setInitialized(true);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Unable to connect");
@@ -213,9 +250,11 @@ export function App(): ReactElement {
                 method: "PUT",
                 body: JSON.stringify({ expectedRevision: revisionRef.current, definition: nextDefinition })
               });
+              const summary = await api<ApiFormSummary>(`/api/forms/${formId}`);
               revisionRef.current = saved.revision;
               setDraftRevision(saved.revision);
               setDefinition(nextDefinition);
+              setFormSummary(summary);
               setStatus(`Draft saved r${saved.revision}`);
             }}
             onPublish={async (nextDefinition) => {
@@ -232,13 +271,18 @@ export function App(): ReactElement {
                 method: "POST",
                 body: JSON.stringify({ expectedRevision: saved.revision })
               });
+              const summary = await api<ApiFormSummary>(`/api/forms/${formId}`);
               revisionRef.current = saved.revision;
               setDraftRevision(saved.revision);
               setDefinition(nextDefinition);
               setDefinitionId(published.definitionId);
               setPublishedDefinition(nextDefinition);
+              setFormSummary(summary);
               setStatus(`Published v${published.publicationVersion}`);
             }}
+            publishedVersion={formSummary?.publishedVersion ?? undefined}
+            archived={formSummary?.archived ?? false}
+            hasUnpublishedChanges={formSummary?.hasUnpublishedChanges ?? false}
           /> : null}
         </Box>
         <Box hidden={mode !== "renderer"}>

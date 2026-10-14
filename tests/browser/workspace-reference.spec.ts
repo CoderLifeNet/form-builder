@@ -217,3 +217,86 @@ test("workspace reference host supports persisted submissions, read-only renderi
   await page.getByRole("button", { name: "Open selected form version", exact: true }).click();
   await expect(page.getByLabel("Added in v2")).toBeVisible();
 });
+
+test("workspace manager exposes version history and publish cancellation leaves versions unchanged", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const seeded = await page.evaluate(async ({ definition, apiBaseUrl }) => {
+    const requestJson = async (input: string, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(`Seed request failed (${response.status}) for ${input}: ${JSON.stringify(body)}`);
+      }
+      return body as Record<string, unknown>;
+    };
+
+    await requestJson(`${apiBaseUrl}/dev/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+    });
+
+    const formName = `Publish cancel ${Date.now()}`;
+    const created = await requestJson(`${apiBaseUrl}/api/forms`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: formName,
+        description: "Seeded for publish cancel flow",
+        definition
+      })
+    });
+
+    const published = await requestJson(`${apiBaseUrl}/api/forms/${created.formId}/publish`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", "idempotency-key": `publish_seed_${Date.now()}` },
+      body: JSON.stringify({ expectedRevision: created.draftRevision })
+    });
+
+    return {
+      formId: String(created.formId),
+      formName,
+      initialVersion: Number(published.publicationVersion)
+    };
+  }, { definition: starterDefinition, apiBaseUrl });
+
+  await page.reload();
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const formButton = page.getByRole("button", { name: seeded.formName, exact: true });
+  await formButton.click();
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
+
+  const formRow = page.locator("li").filter({ has: page.getByRole("button", { name: seeded.formName, exact: true }) }).first();
+  await formRow.getByRole("button", { name: "Version history", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Published form versions" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
+  await page.getByRole("button", { name: seeded.formName, exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Form designer", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish version", exact: true })).toBeDisabled();
+  await expect(page.getByText("There are no unpublished changes to publish.")).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Label" }).fill("Title updated but canceled publish");
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Publish a new version?");
+    await dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "Publish version", exact: true }).click();
+
+  const versions = await page.evaluate(async ({ apiBaseUrl, formId }) => {
+    const response = await fetch(`${apiBaseUrl}/api/forms/${formId}/versions`, { credentials: "include" });
+    if (!response.ok) {
+      throw new Error(`Version list failed with status ${response.status}`);
+    }
+    return (await response.json()) as Array<{ publicationVersion: number }>;
+  }, { apiBaseUrl, formId: seeded.formId });
+  expect(versions).toHaveLength(1);
+  expect(versions[0]?.publicationVersion).toBe(seeded.initialVersion);
+});

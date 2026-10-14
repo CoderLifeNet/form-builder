@@ -87,7 +87,14 @@ integration("sequential upgrade and bindings", () => {
     await repo.saveBinding(ctx,parent,{formId:created.formId,mode:"latest",expectedRevision:0});
     await repo.saveBinding(ctx,child,{formId:created.formId,mode:"pinned",definitionId:first.definitionId,expectedRevision:0});
     const draft=await repo.getDraft(ctx,created.formId);
-    const saved=await repo.saveDraft(ctx,created.formId,draft!.revision,draft!.definition);
+    const changedDraft={
+      ...draft!.definition,
+      metadata: {
+        ...draft!.definition.metadata,
+        description: "updated before second publish"
+      }
+    };
+    const saved=await repo.saveDraft(ctx,created.formId,draft!.revision,changedDraft);
     const second=await repo.publishDraft(ctx,created.formId,saved.revision);
     expect((await repo.resolveBinding(ctx,[parent,child]))?.definitionId).toBe(first.definitionId);
     await expect(repo.resetBinding(ctx,child,99)).rejects.toThrow("BINDING_CONFLICT");

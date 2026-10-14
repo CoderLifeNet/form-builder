@@ -82,7 +82,7 @@ try {
     import { DataTable } from '@coderlifenet/ui-components';
     const definition: FormDefinition = { metadata:{formId:'f',name:'F',schemaVersion:'1.0.0'}, fields:[], sections:[], dependencyVersions:{} };
     const props: FormRendererProps = { definition, mode:'new' };
-    const managed: ManagedForm = { id:'f', name:'Form', archived:false, hasDraft:true, definition };
+    const managed: ManagedForm = { id:'f', name:'Form', archived:false, hasUnpublishedChanges:true, definition };
     const policy: PolicyAdapter = { resolveContext: async () => ({ tenantId:'t', actorId:'a', isAnonymous:false }), authorize: async () => ({ allowed:true, capabilities:[] }) };
     const ctx: DbContext = { tenantId:'t', actorId:'a' };
     const element = <TrackingBoundary id="consumer" events={[]}><FormRenderer {...props} /></TrackingBoundary>;

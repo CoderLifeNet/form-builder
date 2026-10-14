@@ -50,6 +50,17 @@ function makeRepositoryStub() {
     getDraft: async () => ({ revision: 1, definition }),
     saveDraft: async () => ({ revision: 2 }),
     publishDraft: async () => ({ definitionId: "d1", publicationVersion: 1 }),
+    getFormById: async () => ({
+      id: "f1",
+      name: "Form",
+      description: null,
+      archived: false,
+      draftRevision: 1,
+      publishedVersion: 1,
+      publishedDefinitionId: "d1",
+      hasUnpublishedChanges: false,
+      lifecycleState: "published_clean"
+    }),
     getPublishedDefinitionById: async () => ({ id: "d1", formId: "f1", publicationVersion: 1, definition }),
     createUpload: async () => ({ id: "up_db_1", uploadId: "upload_1" }),
     getUploadById: async () => ({

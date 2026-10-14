@@ -1033,4 +1033,215 @@ integration("form server acceptance integration", () => {
     const outsiderDownload = await withIdentity(request(app).get(`/api/uploads/${uploaded.body.uploadId}/download`), outsider);
     expect(outsiderDownload.status).toBe(404);
   });
+
+  it("enforces publish eligibility, supports idempotent publish retries, and rejects republish without unpublished changes", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+    const created = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Publish eligibility ${Date.now()}`,
+        definition: createBaseDefinition("Publish eligibility")
+      }),
+      owner
+    );
+    expect(created.status).toBe(201);
+
+    const publishKey = `publish_${Date.now()}`;
+    const firstPublish = await withIdentity(
+      request(app)
+        .post(`/api/forms/${created.body.formId}/publish`)
+        .set("idempotency-key", publishKey)
+        .send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(firstPublish.status).toBe(201);
+
+    const retriedPublish = await withIdentity(
+      request(app)
+        .post(`/api/forms/${created.body.formId}/publish`)
+        .set("idempotency-key", publishKey)
+        .send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(retriedPublish.status).toBe(201);
+    expect(retriedPublish.body).toEqual(firstPublish.body);
+
+    const republishNoChanges = await withIdentity(
+      request(app).post(`/api/forms/${created.body.formId}/publish`).send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(republishNoChanges.status).toBe(409);
+    expect(republishNoChanges.body.code).toBe("NO_UNPUBLISHED_CHANGES");
+
+    const draft = await withIdentity(request(app).get(`/api/forms/${created.body.formId}/draft`), owner);
+    const unchangedSave = await withIdentity(
+      request(app).put(`/api/forms/${created.body.formId}/draft`).send({ expectedRevision: draft.body.revision, definition: draft.body.definition }),
+      owner
+    );
+    expect(unchangedSave.status).toBe(200);
+
+    const publishAfterUnchangedSave = await withIdentity(
+      request(app).post(`/api/forms/${created.body.formId}/publish`).send({ expectedRevision: unchangedSave.body.revision }),
+      owner
+    );
+    expect(publishAfterUnchangedSave.status).toBe(409);
+    expect(publishAfterUnchangedSave.body.code).toBe("NO_UNPUBLISHED_CHANGES");
+  });
+
+  it("blocks new submissions for archived forms while preserving historical retrieval", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+    const scopeId = `archive-test-${Date.now()}`;
+    const created = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Archive gate ${Date.now()}`,
+        definition: createBaseDefinition("Archive gate")
+      }),
+      owner
+    );
+    expect(created.status).toBe(201);
+
+    const published = await withIdentity(
+      request(app).post(`/api/forms/${created.body.formId}/publish`).send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(published.status).toBe(201);
+
+    const beforeArchive = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", nextIdempotencyKey())
+        .send({ formId: created.body.formId, definitionId: published.body.definitionId, values: { field_title: "before archive" } }),
+      owner
+    );
+    expect(beforeArchive.status).toBe(201);
+
+    const archived = await withIdentity(request(app).post(`/api/forms/${created.body.formId}/archive`).send({}), owner);
+    expect(archived.status).toBe(204);
+
+    const blockedDirect = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", nextIdempotencyKey())
+        .send({ formId: created.body.formId, definitionId: published.body.definitionId, values: { field_title: "blocked direct" } }),
+      owner
+    );
+    expect(blockedDirect.status).toBe(409);
+    expect(blockedDirect.body.code).toBe("FORM_ARCHIVED");
+
+    const bindingSaved = await withIdentity(
+      request(app).put(`/api/bindings/workspace/${scopeId}`).send({
+        formId: created.body.formId,
+        mode: "pinned",
+        definitionId: published.body.definitionId,
+        expectedRevision: 0
+      }),
+      owner
+    );
+    expect(bindingSaved.status).toBe(200);
+
+    const blockedPinned = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", nextIdempotencyKey())
+        .send({
+          formId: created.body.formId,
+          definitionId: published.body.definitionId,
+          binding: {
+            scopeType: "workspace",
+            scopeId,
+            revision: bindingSaved.body.revision,
+            definitionId: published.body.definitionId
+          },
+          values: { field_title: "blocked pinned" }
+        }),
+      owner
+    );
+    expect(blockedPinned.status).toBe(409);
+    expect(blockedPinned.body.code).toBe("FORM_ARCHIVED");
+
+    const history = await withIdentity(request(app).get(`/api/records/${beforeArchive.body.recordId}/history`), owner);
+    expect(history.status).toBe(200);
+    expect(history.body[0].values.field_title).toBe("before archive");
+  });
+
+  it("supports delete-draft and discard-unpublished-changes without resurrecting stale saves", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+
+    const draftOnly = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Draft only ${Date.now()}`,
+        definition: createBaseDefinition("Draft only")
+      }),
+      owner
+    );
+    expect(draftOnly.status).toBe(201);
+
+    const deleted = await withIdentity(
+      request(app)
+        .delete(`/api/forms/${draftOnly.body.formId}/draft`)
+        .send({ expectedRevision: draftOnly.body.draftRevision }),
+      owner
+    );
+    expect(deleted.status).toBe(204);
+
+    const staleSaveAfterDelete = await withIdentity(
+      request(app).put(`/api/forms/${draftOnly.body.formId}/draft`).send({
+        expectedRevision: draftOnly.body.draftRevision,
+        definition: createBaseDefinition("Draft only")
+      }),
+      owner
+    );
+    expect(staleSaveAfterDelete.status).toBe(409);
+    expect(staleSaveAfterDelete.body.code).toBe("DRAFT_CONFLICT");
+
+    const published = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Discard changes ${Date.now()}`,
+        definition: createBaseDefinition("Discard changes")
+      }),
+      owner
+    );
+    expect(published.status).toBe(201);
+
+    const firstPublish = await withIdentity(
+      request(app).post(`/api/forms/${published.body.formId}/publish`).send({ expectedRevision: published.body.draftRevision }),
+      owner
+    );
+    expect(firstPublish.status).toBe(201);
+
+    const draft = await withIdentity(request(app).get(`/api/forms/${published.body.formId}/draft`), owner);
+    const changedDefinition = {
+      ...draft.body.definition,
+      fields: draft.body.definition.fields.map((field: FormDefinition["fields"][number]) =>
+        field.id === "field_title" ? { ...field, label: "Changed title" } : field
+      )
+    } satisfies FormDefinition;
+
+    const saved = await withIdentity(
+      request(app).put(`/api/forms/${published.body.formId}/draft`).send({ expectedRevision: draft.body.revision, definition: changedDefinition }),
+      owner
+    );
+    expect(saved.status).toBe(200);
+
+    const discarded = await withIdentity(
+      request(app)
+        .post(`/api/forms/${published.body.formId}/discard-unpublished`)
+        .send({ expectedRevision: saved.body.revision }),
+      owner
+    );
+    expect(discarded.status).toBe(200);
+
+    const staleSaveAfterDiscard = await withIdentity(
+      request(app).put(`/api/forms/${published.body.formId}/draft`).send({ expectedRevision: saved.body.revision, definition: changedDefinition }),
+      owner
+    );
+    expect(staleSaveAfterDiscard.status).toBe(409);
+    expect(staleSaveAfterDiscard.body.code).toBe("DRAFT_CONFLICT");
+
+    const republishWithoutChanges = await withIdentity(
+      request(app).post(`/api/forms/${published.body.formId}/publish`).send({ expectedRevision: discarded.body.revision }),
+      owner
+    );
+    expect(republishWithoutChanges.status).toBe(409);
+    expect(republishWithoutChanges.body.code).toBe("NO_UNPUBLISHED_CHANGES");
+  });
 });
