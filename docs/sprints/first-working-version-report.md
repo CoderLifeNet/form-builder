@@ -4,6 +4,55 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: section authoring + clarity pass (2026-10-13)
+
+Branch: `feat/ui-0.2-integration`.
+
+This pass focused on making sections first-class authoring containers in the builder canvas while keeping lifecycle, publication, autosave, history, and host-boundary contracts unchanged.
+
+Implemented:
+
+- Visible section containers in builder canvas with distinct authoring outlines.
+- Section selection, inline rename, reorder (earlier/later), and removal actions.
+- New section flow now immediately selects the created section and exposes naming input.
+- New fields now attach to the selected section.
+- Field movement between sections supported by:
+  - field settings placement section chooser (keyboard-accessible), and
+  - drag-drop to section containers.
+- Safe populated-section removal flow:
+  - move fields to another section and remove section, or
+  - explicit delete of section and its fields.
+- Keyboard alternatives retained/expanded:
+  - field reorder/resize (`Alt+Arrow`),
+  - section reorder from section list (`Alt+Arrow`),
+  - placement tab section reassignment.
+- Renderer grouping semantics updated to `fieldset` + `legend` for sectioned input groups.
+- Instruction copy reduced in core builder surfaces while preserving error, recovery, and publication constraints.
+
+Focused regression coverage added/updated:
+
+- `packages/form-builder/src/autosave.test.tsx`
+  - section creation + naming + add-to-selected-section behavior.
+  - safe populated-section removal choices.
+  - existing drag-image coverage retained.
+- `tests/browser/accessibility.spec.ts`
+  - builder keyboard test locator tightened to draggable field tiles after section action controls were introduced.
+
+Validation evidence:
+
+| Command | Result |
+| --- | --- |
+| `npm run build` | PASS across package builds and both example app builds. |
+| `npm run typecheck` | PASS across all workspaces and examples. |
+| `npm test` | PASS with exact counts: `@coderlifenet/form-builder` 5 passed, `@coderlifenet/form-core` 9 passed, `@coderlifenet/form-react` 24 passed, `@coderlifenet/form-server` 19 passed/7 skipped, `@coderlifenet/form-postgres` 6 skipped, `example-minimal` 1 passed. |
+| `npm run test:browser` | PASS: 14 Playwright checks. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@localhost:55432/formbuilder_test npm run test:browser:workspace` | PASS: workspace lifecycle flow 1 passed. |
+| `npm run verify:consumer` | PASS: single-tarball consumer verification succeeded. |
+
+Acceptance status:
+
+- Human UX and visual acceptance remains pending Chris's hands-on review.
+
 ## Continuation: hands-on UX findings follow-up (2026-10-13)
 
 Branch: `feat/ui-0.2-integration`.

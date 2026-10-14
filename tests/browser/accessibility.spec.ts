@@ -54,7 +54,7 @@ test("builder keyboard operations activate controls, restore focus from popup, a
  await addTextButton.focus();
  await page.keyboard.press("Space");
 
- const layoutButtons=page.locator('section[aria-label="Form builder"] main button');
+ const layoutButtons=page.locator('section[aria-label="Form builder"] main button[draggable="true"]');
  await expect(layoutButtons).toHaveCount(2);
  await expect(layoutButtons.first()).toContainText("Name");
 

@@ -43,3 +43,30 @@ it("uses a single-field custom drag image for layout reordering",()=>{
  fireEvent.dragEnd(layoutField!);
  expect(dragGhost?.isConnected).toBe(false);
 });
+
+it("creates and names sections, then adds new fields to the selected section", async () => {
+ const save=vi.fn();
+ render(<FormBuilder initialDefinition={definition} onSaveDraft={save} onPublish={vi.fn()} autosaveDelay={false}/>);
+
+ await userEvent.click(screen.getByRole("button",{name:"New section"}));
+ const sectionName = screen.getByRole("textbox", { name: "Section name" });
+ await userEvent.clear(sectionName);
+ await userEvent.type(sectionName, "Operations");
+ await userEvent.click(screen.getByRole("button",{name:"Text"}));
+
+ const textFieldTile = screen.getByRole("button", { name: /Text field/i });
+ await userEvent.click(textFieldTile);
+ await userEvent.click(screen.getByRole("button", { name: "Placement" }));
+ expect(screen.getByRole("combobox", { name: "Section" }).textContent).toContain("Operations");
+});
+
+it("shows safe remove choices for populated sections", async () => {
+ const save=vi.fn();
+ render(<FormBuilder initialDefinition={definition} onSaveDraft={save} onPublish={vi.fn()} autosaveDelay={false}/>);
+ await userEvent.click(screen.getByRole("button",{name:"New section"}));
+ await userEvent.click(screen.getByRole("button",{name:"Text"}));
+ await userEvent.click(screen.getAllByRole("button",{name:"Remove section"})[1]);
+ expect(screen.getByText("This section has fields. Move them to another section or delete them with the section.")).toBeTruthy();
+ expect(screen.getByRole("button", { name: "Move fields and remove section" })).toBeTruthy();
+ expect(screen.getByRole("button", { name: "Delete section and fields" })).toBeTruthy();
+});

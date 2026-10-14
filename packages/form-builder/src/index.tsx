@@ -200,6 +200,10 @@ export function FormBuilder(props: {
   const dragGhost = useRef<HTMLDivElement | null>(null);
   const [draggingFieldId, setDraggingFieldId] = useState<string | null>(null);
   const [dropTargetFieldId, setDropTargetFieldId] = useState<string | null>(null);
+  const [dropTargetSectionId, setDropTargetSectionId] = useState<string | null>(null);
+  const [selectedSectionId, setSelectedSectionId] = useState<string | null>(props.initialDefinition.sections[0]?.id ?? null);
+  const [pendingSectionRemovalId, setPendingSectionRemovalId] = useState<string | null>(null);
+  const [sectionMoveTargetId, setSectionMoveTargetId] = useState<string | null>(null);
 
   const unresolvedDependencies = useMemo(() => {
     return Object.entries(definition.dependencyVersions)
@@ -221,12 +225,43 @@ export function FormBuilder(props: {
     savedSnapshot.current = JSON.stringify(props.initialDefinition);
     setDefinition(props.initialDefinition);
     setSelectedFieldId(props.initialDefinition.fields[0]?.id ?? null);
+    setSelectedSectionId(props.initialDefinition.sections[0]?.id ?? null);
     setSaveState("saved");
     setSaveMessage("");
   }, [props.initialDefinition.metadata.formId]);
 
+  useEffect(() => {
+    if (!definition.sections.length) {
+      setSelectedSectionId(null);
+      return;
+    }
+    if (selectedField) {
+      setSelectedSectionId(selectedField.sectionId);
+      return;
+    }
+    if (!selectedSectionId || !definition.sections.some((section) => section.id === selectedSectionId)) {
+      setSelectedSectionId(definition.sections[0].id);
+    }
+  }, [definition.sections, definition.fields, selectedFieldId, selectedSectionId]);
+
   const selectedField = definition.fields.find((field) => field.id === selectedFieldId) ?? null;
   const sectionChoices = definition.sections;
+  const orderedSections = useMemo(
+    () => [...definition.sections].sort((a, b) => a.order - b.order),
+    [definition.sections]
+  );
+  const sectionFields = useMemo(() => {
+    const map = new Map<string, Field[]>();
+    for (const section of orderedSections) {
+      map.set(
+        section.id,
+        definition.fields
+          .filter((field) => field.sectionId === section.id)
+          .sort((a, b) => a.row - b.row)
+      );
+    }
+    return map;
+  }, [definition.fields, orderedSections]);
 
   const setDirty = (): void => {
     setSaveState("unsaved");
@@ -253,7 +288,7 @@ export function FormBuilder(props: {
 
   const addField = (type: Field["type"]): void => {
     const id = createStableId("field");
-    const sectionId = definition.sections[0]?.id ?? createStableId("section");
+    const sectionId = selectedSectionId ?? definition.sections[0]?.id ?? createStableId("section");
     const newField: Field = {
       id,
       key: id,
@@ -280,6 +315,7 @@ export function FormBuilder(props: {
     }));
 
     setSelectedFieldId(id);
+    setSelectedSectionId(sectionId);
     setActiveTab("basic");
   };
 
@@ -341,6 +377,101 @@ export function FormBuilder(props: {
         }
       ]
     }));
+    setSelectedSectionId(newSectionId);
+    setSelectedFieldId(null);
+  };
+
+  const updateSectionTitle = (sectionId: string, title: string): void => {
+    updateDefinition((prev) => ({
+      ...prev,
+      sections: prev.sections.map((section) =>
+        section.id === sectionId ? { ...section, title } : section
+      )
+    }));
+  };
+
+  const moveSection = (sectionId: string, direction: -1 | 1): void => {
+    updateDefinition((prev) => {
+      const sorted = [...prev.sections].sort((a, b) => a.order - b.order);
+      const index = sorted.findIndex((section) => section.id === sectionId);
+      const target = index + direction;
+      if (index < 0 || target < 0 || target >= sorted.length) {
+        return prev;
+      }
+      const next = [...sorted];
+      const [moved] = next.splice(index, 1);
+      next.splice(target, 0, moved);
+      return {
+        ...prev,
+        sections: next.map((section, idx) => ({ ...section, order: idx }))
+      };
+    });
+  };
+
+  const moveFieldToSectionEnd = (fieldId: string, sectionId: string): void => {
+    updateDefinition((prev) => {
+      const index = prev.fields.findIndex((field) => field.id === fieldId);
+      if (index < 0) {
+        return prev;
+      }
+      const next = [...prev.fields];
+      const [moved] = next.splice(index, 1);
+      moved.sectionId = sectionId;
+      const targetLastIndex = next.reduce((lastIndex, candidate, candidateIndex) => (
+        candidate.sectionId === sectionId ? candidateIndex : lastIndex
+      ), -1);
+      const insertIndex = targetLastIndex < 0 ? next.length : targetLastIndex + 1;
+      next.splice(insertIndex, 0, moved);
+      return { ...prev, fields: next.map((field, idx) => ({ ...field, row: idx })) };
+    });
+  };
+
+  const finalizeSectionRemoval = (sectionId: string, mode: "move" | "delete", targetSectionId?: string): void => {
+    updateDefinition((prev) => {
+      const remainingSections = prev.sections
+        .filter((section) => section.id !== sectionId)
+        .sort((a, b) => a.order - b.order)
+        .map((section, idx) => ({ ...section, order: idx }));
+
+      const nextFields = prev.fields
+        .filter((field) => mode === "delete" ? field.sectionId !== sectionId : true)
+        .map((field) => {
+          if (mode === "move" && field.sectionId === sectionId && targetSectionId) {
+            return { ...field, sectionId: targetSectionId };
+          }
+          return field;
+        })
+        .map((field, idx) => ({ ...field, row: idx }));
+
+      return {
+        ...prev,
+        sections: remainingSections,
+        fields: nextFields
+      };
+    });
+
+    if (mode === "delete" && selectedField && selectedField.sectionId === sectionId) {
+      const nextField = definition.fields.find((field) => field.sectionId !== sectionId);
+      setSelectedFieldId(nextField?.id ?? null);
+    }
+    setSelectedSectionId(targetSectionId ?? orderedSections.find((section) => section.id !== sectionId)?.id ?? null);
+    setPendingSectionRemovalId(null);
+    setSectionMoveTargetId(null);
+  };
+
+  const requestSectionRemoval = (sectionId: string): void => {
+    if (orderedSections.length <= 1) {
+      setSaveMessage("At least one section is required.");
+      return;
+    }
+    const fieldsInSection = (sectionFields.get(sectionId) ?? []).length;
+    if (!fieldsInSection) {
+      finalizeSectionRemoval(sectionId, "delete");
+      return;
+    }
+    const target = orderedSections.find((section) => section.id !== sectionId)?.id ?? null;
+    setPendingSectionRemovalId(sectionId);
+    setSectionMoveTargetId(target);
   };
 
   const updateSelectOptions = (multiline: string): void => {
@@ -406,6 +537,7 @@ export function FormBuilder(props: {
   const handleCanvasDrop = (event: DragEvent<HTMLButtonElement>, targetFieldId: string): void => {
     event.preventDefault();
     setDropTargetFieldId(null);
+    setDropTargetSectionId(null);
     const draggedFieldId = event.dataTransfer.getData(DRAG_FIELD_MIME) || draggingFieldId;
     if (!draggedFieldId || draggedFieldId === targetFieldId) {
       return;
@@ -418,6 +550,19 @@ export function FormBuilder(props: {
 
     moveFieldToIndex(draggedFieldId, targetIndex);
     setDraggingFieldId(null);
+  };
+
+  const handleSectionDrop = (event: DragEvent<HTMLElement>, targetSectionId: string): void => {
+    event.preventDefault();
+    setDropTargetFieldId(null);
+    setDropTargetSectionId(null);
+    const draggedFieldId = event.dataTransfer.getData(DRAG_FIELD_MIME) || draggingFieldId;
+    if (!draggedFieldId) {
+      return;
+    }
+    moveFieldToSectionEnd(draggedFieldId, targetSectionId);
+    setDraggingFieldId(null);
+    setSelectedSectionId(targetSectionId);
   };
 
   const clearDragGhost = (): void => {
@@ -561,8 +706,41 @@ export function FormBuilder(props: {
             <Button type="button" size="small" variant="text" onClick={addSection}>New section</Button>
           </Stack>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5, mb: 1 }}>
-            Choose a field type, then configure it in Field settings.
+            New fields are added to the selected section.
           </Typography>
+          <Stack spacing={0.75} sx={{ mb: 1.25 }}>
+            {orderedSections.map((section, index) => (
+              <Button
+                key={section.id}
+                type="button"
+                size="small"
+                variant={selectedSectionId === section.id ? "contained" : "outlined"}
+                sx={{ justifyContent: "space-between" }}
+                onClick={() => {
+                  setSelectedSectionId(section.id);
+                  if (selectedField?.sectionId !== section.id) {
+                    setSelectedFieldId((sectionFields.get(section.id) ?? [])[0]?.id ?? null);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (!event.altKey) {
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    moveSection(section.id, -1);
+                  }
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    moveSection(section.id, 1);
+                  }
+                }}
+              >
+                <span>{section.title}</span>
+                <span>{index + 1}</span>
+              </Button>
+            ))}
+          </Stack>
           <Stack spacing={1} sx={{ mt: 1 }}>
             {paletteFields.map((field) => (
               <Button key={field.type} type="button" variant="outlined" onClick={() => addField(field.type)}>
@@ -575,117 +753,265 @@ export function FormBuilder(props: {
         <Paper component="main" variant="outlined" sx={{ p: 1.5 }}>
           <Typography variant="h6">Form preview layout</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Drag fields to reorder. Keyboard support: Alt+ArrowUp/Down changes order; Alt+ArrowLeft/Right changes width.
+            Drag fields to reorder. Alt+ArrowUp/Down reorders fields. Alt+ArrowLeft/Right changes field width.
           </Typography>
+          {pendingSectionRemovalId ? (
+            <Alert severity="warning" sx={{ mb: 1 }}>
+              <Stack spacing={1}>
+                <Typography variant="body2">This section has fields. Move them to another section or delete them with the section.</Typography>
+                {sectionMoveTargetId ? (
+                  <FormControl size="small">
+                    <InputLabel id="section-move-target-label">Move fields to</InputLabel>
+                    <Select
+                      labelId="section-move-target-label"
+                      label="Move fields to"
+                      value={sectionMoveTargetId}
+                      onChange={(event) => setSectionMoveTargetId(String(event.target.value))}
+                    >
+                      {orderedSections.filter((section) => section.id !== pendingSectionRemovalId).map((section) => (
+                        <MenuItem key={section.id} value={section.id}>{section.title}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
+                ) : null}
+                <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+                  {sectionMoveTargetId ? (
+                    <Button
+                      type="button"
+                      size="small"
+                      variant="contained"
+                      onClick={() => finalizeSectionRemoval(pendingSectionRemovalId, "move", sectionMoveTargetId)}
+                    >
+                      Move fields and remove section
+                    </Button>
+                  ) : null}
+                  <Button
+                    type="button"
+                    size="small"
+                    color="error"
+                    variant="outlined"
+                    onClick={() => finalizeSectionRemoval(pendingSectionRemovalId, "delete")}
+                  >
+                    Delete section and fields
+                  </Button>
+                  <Button
+                    type="button"
+                    size="small"
+                    onClick={() => {
+                      setPendingSectionRemovalId(null);
+                      setSectionMoveTargetId(null);
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                </Stack>
+              </Stack>
+            </Alert>
+          ) : null}
           {definition.fields.length === 0 ? (
             <Alert severity="info" sx={{ mb: 1 }}>
               Start by adding a field from the Add fields panel.
             </Alert>
           ) : null}
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 1 }}>
-            {definition.fields.map((field) => (
-              <Button
-                key={field.id}
-                draggable
-                type="button"
-                variant={selectedFieldId === field.id ? "contained" : "outlined"}
-                sx={{
-                  gridColumn: `span ${field.width}`,
-                  textAlign: "left",
-                  justifyContent: "flex-start",
-                  p: 1,
-                  minHeight: 76,
-                  overflow: "hidden",
-                  borderTop: dropTargetFieldId === field.id && draggingFieldId !== field.id ? "3px solid" : undefined,
-                  borderTopColor: "secondary.main"
-                }}
-                onDragStart={(event) => {
-                  setDraggingFieldId(field.id);
-                  setDropTargetFieldId(null);
-                  clearDragGhost();
-                  const ghost = document.createElement("div");
-                  ghost.textContent = field.label;
-                  ghost.style.position = "fixed";
-                  ghost.style.top = "0";
-                  ghost.style.left = "0";
-                  ghost.style.transform = "translate(-10000px, -10000px)";
-                  ghost.style.padding = "8px 12px";
-                  ghost.style.borderRadius = "8px";
-                  ghost.style.background = "#0b57d0";
-                  ghost.style.color = "#fff";
-                  ghost.style.font = "600 13px sans-serif";
-                  ghost.style.lineHeight = "1.2";
-                  ghost.style.whiteSpace = "nowrap";
-                  ghost.style.pointerEvents = "none";
-                  document.body.appendChild(ghost);
-                  dragGhost.current = ghost;
-                  event.dataTransfer.setData(DRAG_FIELD_MIME, field.id);
-                  event.dataTransfer.setData("text/plain", field.id);
-                  event.dataTransfer.setDragImage(ghost, 14, 14);
-                  event.dataTransfer.effectAllowed = "move";
-                }}
-                onDragEnd={() => {
-                  setDraggingFieldId(null);
-                  setDropTargetFieldId(null);
-                  clearDragGhost();
-                }}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  if (draggingFieldId && draggingFieldId !== field.id) {
-                    setDropTargetFieldId(field.id);
-                  }
-                }}
-                onDragLeave={() => {
-                  if (dropTargetFieldId === field.id) {
-                    setDropTargetFieldId(null);
-                  }
-                }}
-                onDrop={(event) => handleCanvasDrop(event, field.id)}
-                onClick={() => setSelectedFieldId(field.id)}
-                onKeyDown={(event) => {
-                  if (!event.altKey) {
-                    return;
-                  }
-                  if (event.key === "ArrowUp") {
+          <Stack spacing={1.25}>
+            {orderedSections.map((section, sectionIndex) => {
+              const fields = sectionFields.get(section.id) ?? [];
+              const selected = selectedSectionId === section.id;
+              return (
+                <Paper
+                  key={section.id}
+                  variant="outlined"
+                  sx={{
+                    p: 1,
+                    borderColor: selected ? "primary.main" : dropTargetSectionId === section.id ? "secondary.main" : "divider",
+                    borderStyle: dropTargetSectionId === section.id ? "dashed" : "solid"
+                  }}
+                  onDragOver={(event) => {
                     event.preventDefault();
-                    moveField(field.id, -1);
-                  }
-                  if (event.key === "ArrowDown") {
-                    event.preventDefault();
-                    moveField(field.id, 1);
-                  }
-                  if (event.key === "ArrowLeft") {
-                    event.preventDefault();
-                    updateDefinition((prev) => ({
-                      ...prev,
-                      fields: prev.fields.map((candidate) =>
-                        candidate.id === field.id ? { ...candidate, width: Math.max(1, candidate.width - 1) } : candidate
-                      )
-                    }));
-                  }
-                  if (event.key === "ArrowRight") {
-                    event.preventDefault();
-                    updateDefinition((prev) => ({
-                      ...prev,
-                      fields: prev.fields.map((candidate) =>
-                        candidate.id === field.id ? { ...candidate, width: Math.min(12, candidate.width + 1) } : candidate
-                      )
-                    }));
-                  }
-                }}
-              >
-                <Box>
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    {field.label}
-                    {field.required ? " *" : ""}
-                  </Typography>
-                  <Typography variant="caption" color="inherit" sx={{ display: "block" }}>
-                    {previewByType(field)}
-                  </Typography>
-                </Box>
-              </Button>
-            ))}
-          </Box>
+                    if (draggingFieldId) {
+                      setDropTargetSectionId(section.id);
+                    }
+                  }}
+                  onDragLeave={() => {
+                    if (dropTargetSectionId === section.id) {
+                      setDropTargetSectionId(null);
+                    }
+                  }}
+                  onDrop={(event) => handleSectionDrop(event, section.id)}
+                >
+                  <Stack direction="row" spacing={1} sx={{ alignItems: "center", mb: 0.75 }}>
+                    {selected ? (
+                      <TextField
+                        size="small"
+                        label="Section name"
+                        value={section.title}
+                        onChange={(event) => updateSectionTitle(section.id, event.target.value)}
+                        sx={{ flex: 1 }}
+                      />
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="text"
+                        sx={{ justifyContent: "flex-start", flex: 1 }}
+                        onClick={() => {
+                          setSelectedSectionId(section.id);
+                          if (selectedField?.sectionId !== section.id) {
+                            setSelectedFieldId(fields[0]?.id ?? null);
+                          }
+                        }}
+                      >
+                        {section.title}
+                      </Button>
+                    )}
+                    <Tooltip title="Move section earlier">
+                      <span>
+                        <IconButton
+                          aria-label="Move section earlier"
+                          size="small"
+                          disabled={sectionIndex === 0}
+                          onClick={() => moveSection(section.id, -1)}
+                        >
+                          ↑
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="Move section later">
+                      <span>
+                        <IconButton
+                          aria-label="Move section later"
+                          size="small"
+                          disabled={sectionIndex === orderedSections.length - 1}
+                          onClick={() => moveSection(section.id, 1)}
+                        >
+                          ↓
+                        </IconButton>
+                      </span>
+                    </Tooltip>
+                    <Tooltip title="Remove section">
+                      <span>
+                        <IconButton aria-label="Remove section" size="small" color="error" onClick={() => requestSectionRemoval(section.id)}>✕</IconButton>
+                      </span>
+                    </Tooltip>
+                  </Stack>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 1 }}>
+                    {fields.map((field) => (
+                      <Button
+                        key={field.id}
+                        draggable
+                        type="button"
+                        variant={selectedFieldId === field.id ? "contained" : "outlined"}
+                        sx={{
+                          gridColumn: `span ${field.width}`,
+                          textAlign: "left",
+                          justifyContent: "flex-start",
+                          p: 1,
+                          minHeight: 76,
+                          overflow: "hidden",
+                          borderTop: dropTargetFieldId === field.id && draggingFieldId !== field.id ? "3px solid" : undefined,
+                          borderTopColor: "secondary.main"
+                        }}
+                        onDragStart={(event) => {
+                          setDraggingFieldId(field.id);
+                          setDropTargetFieldId(null);
+                          setDropTargetSectionId(null);
+                          clearDragGhost();
+                          const ghost = document.createElement("div");
+                          ghost.textContent = field.label;
+                          ghost.style.position = "fixed";
+                          ghost.style.top = "0";
+                          ghost.style.left = "0";
+                          ghost.style.transform = "translate(-10000px, -10000px)";
+                          ghost.style.padding = "8px 12px";
+                          ghost.style.borderRadius = "8px";
+                          ghost.style.background = "#0b57d0";
+                          ghost.style.color = "#fff";
+                          ghost.style.font = "600 13px sans-serif";
+                          ghost.style.lineHeight = "1.2";
+                          ghost.style.whiteSpace = "nowrap";
+                          ghost.style.pointerEvents = "none";
+                          document.body.appendChild(ghost);
+                          dragGhost.current = ghost;
+                          event.dataTransfer.setData(DRAG_FIELD_MIME, field.id);
+                          event.dataTransfer.setData("text/plain", field.id);
+                          event.dataTransfer.setDragImage(ghost, 14, 14);
+                          event.dataTransfer.effectAllowed = "move";
+                        }}
+                        onDragEnd={() => {
+                          setDraggingFieldId(null);
+                          setDropTargetFieldId(null);
+                          setDropTargetSectionId(null);
+                          clearDragGhost();
+                        }}
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          if (draggingFieldId && draggingFieldId !== field.id) {
+                            setDropTargetFieldId(field.id);
+                            setDropTargetSectionId(section.id);
+                          }
+                        }}
+                        onDragLeave={() => {
+                          if (dropTargetFieldId === field.id) {
+                            setDropTargetFieldId(null);
+                          }
+                        }}
+                        onDrop={(event) => handleCanvasDrop(event, field.id)}
+                        onClick={() => {
+                          setSelectedFieldId(field.id);
+                          setSelectedSectionId(section.id);
+                        }}
+                        onKeyDown={(event) => {
+                          if (!event.altKey) {
+                            return;
+                          }
+                          if (event.key === "ArrowUp") {
+                            event.preventDefault();
+                            moveField(field.id, -1);
+                          }
+                          if (event.key === "ArrowDown") {
+                            event.preventDefault();
+                            moveField(field.id, 1);
+                          }
+                          if (event.key === "ArrowLeft") {
+                            event.preventDefault();
+                            updateDefinition((prev) => ({
+                              ...prev,
+                              fields: prev.fields.map((candidate) =>
+                                candidate.id === field.id ? { ...candidate, width: Math.max(1, candidate.width - 1) } : candidate
+                              )
+                            }));
+                          }
+                          if (event.key === "ArrowRight") {
+                            event.preventDefault();
+                            updateDefinition((prev) => ({
+                              ...prev,
+                              fields: prev.fields.map((candidate) =>
+                                candidate.id === field.id ? { ...candidate, width: Math.min(12, candidate.width + 1) } : candidate
+                              )
+                            }));
+                          }
+                        }}
+                      >
+                        <Box>
+                          <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                            {field.label}
+                            {field.required ? " *" : ""}
+                          </Typography>
+                          <Typography variant="caption" color="inherit" sx={{ display: "block" }}>
+                            {previewByType(field)}
+                          </Typography>
+                        </Box>
+                      </Button>
+                    ))}
+                  </Box>
+                  {!fields.length ? (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                      No fields in this section yet.
+                    </Typography>
+                  ) : null}
+                </Paper>
+              );
+            })}
+          </Stack>
         </Paper>
 
         <Paper component="aside" variant="outlined" sx={{ p: 1.5 }}>

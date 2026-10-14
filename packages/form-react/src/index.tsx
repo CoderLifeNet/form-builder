@@ -235,8 +235,8 @@ export function FormRenderer(props: FormRendererProps): ReactElement {
       {[...props.definition.sections]
         .sort((a, b) => a.order - b.order)
         .map((section) => (
-          <Box key={section.id} component="section" sx={{ mb: 1.5 }}>
-            <Typography variant="h6" component="h3" sx={{ mb: 1 }}>{section.title}</Typography>
+          <Box key={section.id} component="fieldset" sx={{ mb: 1.5, border: 0, p: 0, m: 0 }}>
+            <Typography variant="h6" component="legend" sx={{ mb: 1 }}>{section.title}</Typography>
             <Box sx={{ display: "grid", gridTemplateColumns: "repeat(12, minmax(0, 1fr))", gap: 1.5 }}>
               {(fieldsBySection.get(section.id) ?? []).map((field) => {
                 const state = deriveFieldState(props.definition, field.id, values);
