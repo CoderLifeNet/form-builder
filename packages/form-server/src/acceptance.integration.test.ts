@@ -415,6 +415,82 @@ integration("form server acceptance integration", () => {
     expect(history.body[0].values.field_title).toBe("filled");
   });
 
+  it("renames forms with persistence and enforces validation, conflicts, and authorization", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+    const collaborator = { actorId: "collab1", tenantId: "tenant_alpha" };
+
+    const createdA = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Rename source ${Date.now()}`,
+        definition: createBaseDefinition("Rename source")
+      }),
+      owner
+    );
+    expect(createdA.status).toBe(201);
+
+    const conflictName = `Rename conflict ${Date.now()}`;
+    const createdB = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: conflictName,
+        definition: createBaseDefinition("Rename conflict")
+      }),
+      owner
+    );
+    expect(createdB.status).toBe(201);
+
+    const renamedName = `Renamed form ${Date.now()}`;
+    const renameSuccess = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: renamedName }),
+      owner
+    );
+    expect(renameSuccess.status).toBe(200);
+    expect(renameSuccess.body.name).toBe(renamedName);
+
+    const reloadedById = await withIdentity(
+      request(app).get(`/api/forms/${createdA.body.formId}`),
+      owner
+    );
+    expect(reloadedById.status).toBe(200);
+    expect(reloadedById.body.name).toBe(renamedName);
+
+    const reloadedList = await withIdentity(
+      request(app).get("/api/forms?includeArchived=true"),
+      owner
+    );
+    expect(reloadedList.status).toBe(200);
+    const listedRenamed = reloadedList.body.find((form: { id: string; name: string }) => form.id === createdA.body.formId);
+    expect(listedRenamed?.name).toBe(renamedName);
+
+    const whitespace = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: "   " }),
+      owner
+    );
+    expect(whitespace.status).toBe(400);
+    expect(whitespace.body.code).toBe("BAD_REQUEST");
+    expect(whitespace.body.message).toBe("Enter a form name.");
+
+    const conflict = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: conflictName }),
+      owner
+    );
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.code).toBe("FORM_NAME_CONFLICT");
+
+    const unauthorized = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: "Attempt by collaborator" }),
+      collaborator
+    );
+    expect(unauthorized.status).toBe(403);
+    expect(unauthorized.body.code).toBe("FORBIDDEN");
+
+    const unchanged = await withIdentity(
+      request(app).get(`/api/forms/${createdA.body.formId}`),
+      owner
+    );
+    expect(unchanged.status).toBe(200);
+    expect(unchanged.body.name).toBe(renamedName);
+  });
+
   it("supports single and multi-upload submission and prevents cross-tenant access", async () => {
     const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
     const outsider = { actorId: "owner2", tenantId: "tenant_beta" };

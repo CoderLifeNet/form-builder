@@ -69,7 +69,7 @@ const draftLifecycleMutationSchema = z.object({
 });
 
 const renameFormSchema = z.object({
-  name: z.string().min(1)
+  name: z.string().transform((value) => value.trim()).refine((value) => value.length > 0, { message: "Enter a form name." })
 });
 
 const saveRecordSchema = z.object({
@@ -1175,6 +1175,10 @@ export function createFormServer(options?: {
       }
       if (error.message === "FORM_NAME_CONFLICT") {
         res.status(409).json(errorEnvelope("FORM_NAME_CONFLICT", "A form with this name already exists in the current tenant."));
+        return;
+      }
+      if (error.message === "FORM_NAME_REQUIRED") {
+        res.status(400).json(errorEnvelope("BAD_REQUEST", "Enter a form name."));
         return;
       }
       if (error.message === "NO_UNPUBLISHED_CHANGES") {

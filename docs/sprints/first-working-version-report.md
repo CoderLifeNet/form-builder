@@ -4,6 +4,55 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: rename correctness correction on feat/ui-0.2-integration (2026-10-14)
+
+Branch: `feat/ui-0.2-integration`.
+
+This bounded correction tightened the rename flow introduced in `f008e37` without expanding lifecycle scope.
+
+Implemented corrections:
+
+- Workspace UI rename handler now catches and reports failures instead of allowing unhandled async failures.
+- Rename status messaging now distinguishes:
+  - name conflict (`FORM_NAME_CONFLICT`),
+  - permission denial (`FORBIDDEN`),
+  - missing target (`FORM_NOT_FOUND`),
+  - validation (`BAD_REQUEST`),
+  - network/server reachability failures.
+- Canceling rename (`prompt` dismiss) now performs no mutation request.
+- Server rename validation now trims names before validation and rejects empty/whitespace-only names with `400 BAD_REQUEST` and message `Enter a form name.`
+- Defensive repository validation remains in place (`FORM_NAME_REQUIRED`) and is mapped to a clean `400` response instead of `500`.
+- Tenant-scoped authorization and uniqueness behavior remain unchanged.
+
+Regression coverage added/updated:
+
+- `packages/form-server/src/acceptance.integration.test.ts`
+  - successful rename persists and survives reload/readback,
+  - whitespace-only rename returns clean validation error,
+  - conflicting rename returns `409` and preserves existing name,
+  - unauthorized collaborator rename returns `403`.
+- `tests/browser/workspace-reference.spec.ts`
+  - rename cancellation sends no PATCH mutation,
+  - conflict failure is visible in UI,
+  - conflict path produces no browser `pageerror` (no unhandled rejection).
+
+Validation evidence for this correction:
+
+| Command | Result |
+| --- | --- |
+| `npm run build -w @coderlifenet/form-postgres` | PASS |
+| `npm run build -w @coderlifenet/form-builder` | PASS |
+| `npm run typecheck` | PASS across workspace, packages, and examples |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:integration` | PASS: `@coderlifenet/form-postgres` 6/6; `@coderlifenet/form-server` acceptance 11/11 |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:browser:workspace` | PASS: Playwright workspace suite 3/3 |
+| `npm run pack:artifacts` | PASS (`@coderlifenet/form-builder` tarball rebuilt) |
+| `npm run verify:consumer` | PASS (fresh artifact consumer verification) |
+
+Remaining gaps in this bounded scope:
+
+- None identified for rename correctness behavior, validation semantics, or targeted regression coverage.
+- Existing non-blocking sourcemap warnings during browser runs remain unchanged and are outside this rename-scope correction.
+
 ## Continuation: bounded lifecycle correction + local demo reset (2026-10-14)
 
 Branch: `feat/ui-0.2-integration`.

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef, type ReactElement } from "react";
 import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder/builder";
-import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView } from "@coderlifenet/form-builder/renderer";
+import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView, FormRequestError } from "@coderlifenet/form-builder/renderer";
 import type { FormDefinition } from "@coderlifenet/form-builder/core";
 import { Alert, Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
 
@@ -193,6 +193,33 @@ function formatNameTimestamp(date: Date): string {
     hour: "2-digit",
     minute: "2-digit"
   }).format(date);
+}
+
+function renameFailureMessage(error: unknown): string {
+  if (error instanceof FormRequestError) {
+    if (error.code === "FORM_NAME_CONFLICT") {
+      return "A form with this name already exists. Choose a different name.";
+    }
+    if (error.code === "FORBIDDEN") {
+      return "You do not have permission to rename this form.";
+    }
+    if (error.code === "FORM_NOT_FOUND") {
+      return "This form no longer exists. Refresh and try again.";
+    }
+    if (error.code === "BAD_REQUEST") {
+      return error.message || "Enter a form name.";
+    }
+    return error.message || "Rename failed. Please try again.";
+  }
+
+  if (error instanceof Error) {
+    if (error.message.toLowerCase().includes("failed to fetch")) {
+      return "Unable to reach the server. Check your connection and try again.";
+    }
+    return error.message;
+  }
+
+  return "Rename failed due to an unexpected error.";
 }
 
 export function App(): ReactElement {
@@ -585,19 +612,27 @@ export function App(): ReactElement {
                 void (async () => {
                   const target = forms.find((form) => form.id === formId);
                   if (!target) {
+                    setStatus("This form no longer exists. Refresh and try again.");
                     return;
                   }
                   const requestedName = window.prompt("Rename form", target.name);
-                  const trimmed = requestedName?.trim();
-                  if (!trimmed || trimmed === target.name) {
+                  if (requestedName === null) {
                     return;
                   }
-                  await api(`/api/forms/${formId}`, {
-                    method: "PATCH",
-                    body: JSON.stringify({ name: trimmed })
-                  });
-                  await refreshForms();
-                  setStatus("Form renamed");
+                  const trimmed = requestedName.trim();
+                  if (trimmed === target.name) {
+                    return;
+                  }
+                  try {
+                    await api(`/api/forms/${formId}`, {
+                      method: "PATCH",
+                      body: JSON.stringify({ name: trimmed })
+                    });
+                    await refreshForms();
+                    setStatus("Form renamed");
+                  } catch (error) {
+                    setStatus(renameFailureMessage(error));
+                  }
                 })();
               }}
               onExport={(formId) => {

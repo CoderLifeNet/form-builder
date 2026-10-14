@@ -300,3 +300,90 @@ test("workspace manager exposes version history and publish cancellation leaves 
   expect(versions).toHaveLength(1);
   expect(versions[0]?.publicationVersion).toBe(seeded.initialVersion);
 });
+
+test("workspace rename handles cancellation and surfaces conflict failures without unhandled errors", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const seeded = await page.evaluate(async ({ definition, apiBaseUrl }) => {
+    const requestJson = async (input: string, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(`Seed request failed (${response.status}) for ${input}: ${JSON.stringify(body)}`);
+      }
+      return body as Record<string, unknown>;
+    };
+
+    await requestJson(`${apiBaseUrl}/dev/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+    });
+
+    const formName = `Rename flow ${Date.now()}`;
+    const created = await requestJson(`${apiBaseUrl}/api/forms`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: formName,
+        description: "Seeded for rename error handling",
+        definition
+      })
+    });
+
+    return {
+      formId: String(created.formId),
+      formName
+    };
+  }, { definition: starterDefinition, apiBaseUrl });
+
+  await page.reload();
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => {
+    pageErrors.push(error);
+  });
+
+  const renamePatchRequests: string[] = [];
+  page.on("request", (requestEvent) => {
+    if (requestEvent.method() === "PATCH" && requestEvent.url().endsWith(`/api/forms/${seeded.formId}`)) {
+      renamePatchRequests.push(requestEvent.url());
+    }
+  });
+
+  const formRow = page.locator("li").filter({ has: page.getByRole("button", { name: seeded.formName, exact: true }) }).first();
+
+  page.once("dialog", async (dialog) => {
+    await dialog.dismiss();
+  });
+  await formRow.getByRole("button", { name: "Rename", exact: true }).click();
+  await expect.poll(() => renamePatchRequests.length).toBe(0);
+
+  await page.route(`**/api/forms/${seeded.formId}`, async (route, requestEvent) => {
+    if (requestEvent.method() === "PATCH") {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "FORM_NAME_CONFLICT",
+          message: "A form with this name already exists in the current tenant.",
+          fieldErrors: []
+        })
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  page.once("dialog", async (dialog) => {
+    await dialog.accept("Conflicting form name");
+  });
+  await formRow.getByRole("button", { name: "Rename", exact: true }).click();
+
+  await expect(page.getByText("A form with this name already exists. Choose a different name.")).toBeVisible();
+  expect(pageErrors).toHaveLength(0);
+});
