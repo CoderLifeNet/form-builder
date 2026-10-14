@@ -98,7 +98,7 @@ export const fieldSchema = z.object({
       version: z.string().min(1),
       kind: z.enum(["value", "options"]).optional(),
       dependsOn: z.array(z.string()).optional(),
-      mode: z.enum(["manual", "create_only", "refresh_on_edit", "display_only"]) 
+      mode: z.enum(["manual", "create_only", "refresh_on_edit", "display_only"])
     })
     .optional(),
   validation: z
