@@ -4,6 +4,41 @@ Date: 2026-10-12
 Branch: feat/first-working-engine
 Candidate version: 0.1.0 (internal, unpublished)
 
+## Continuation: first npm release readiness audit (2026-10-15)
+
+Branch: `feat/ui-0.2-integration`.
+
+Release-readiness validation executed from this checkout (feature-frozen scope, no publish/tag/deploy):
+
+| Command | Result |
+| --- | --- |
+| `npm ci` | PASS (installed 450 packages). |
+| `npm run build` | PASS across package and example builds. |
+| `npm run typecheck` | PASS across workspace/packages/examples. |
+| `npm test` | PASS: `form-builder` 5 passed; `form-core` 9 passed; `form-react` 25 passed; `form-server` 20 passed / 11 skipped; `example-minimal` 1 passed; DB-gated postgres tests skipped in this profile by design. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:integration` | PASS: `form-postgres` 6/6; `form-server` acceptance 11/11. |
+| `npm run test:browser` | PASS: Playwright 14/14 accessibility/keyboard/browser-flow checks. |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:browser:workspace` | PASS: Playwright workspace lifecycle 3/3. |
+| `npm run pack:artifacts` | PASS: `coderlifenet-form-builder-0.1.0-alpha.0.tgz` generated. |
+| `npm run verify:consumer` | PASS: isolated tarball consumer install and runtime/type/export verification. |
+
+Package and workflow release gates verified:
+
+- Public package scope remains one package: `@coderlifenet/form-builder`.
+- Publish workflow (`.github/workflows/publish.yml`) remains `workflow_dispatch` only, dry-run by default, explicit `publish=true` for real publish.
+- Metadata guard verifies lockstep release version, `private=false` only for the public package, and blocks internal unpublished package dependencies.
+- Consumer verification confirms subpath exports (`builder`, `renderer`, `core`, `server`, `postgres`), types, browser/server separation, and host-owned theme/analytics composition.
+
+Current release blockers for actual npm publication:
+
+1. License decision is still pending owner approval (`licenseStatus: pending-chris-decision`).
+2. Publication itself remains unauthorized in this sprint without explicit owner approval.
+
+Non-blocking observations:
+
+- Browser/test runs show sourcemap warnings for missing source files in packed dist output; current runtime/tests pass.
+- `npm ci` reports dependency vulnerabilities; no exploit validation occurred in this bounded release-readiness pass.
+
 ## Continuation: rename correctness correction on feat/ui-0.2-integration (2026-10-14)
 
 Branch: `feat/ui-0.2-integration`.
@@ -534,7 +569,7 @@ Stash `wip-before-ui-0.2-integration-switch` is intentionally retained and not d
 
 ## Continuation: test profiles and record-save recovery (2026-10-13)
 
-Review: https://github.com/CoderLifeNet/form-builder/pull/1 (draft).
+Review: <https://github.com/CoderLifeNet/form-builder/pull/1> (draft).
 
 Implemented typed browser API errors with field-error preservation, readable
 permission recovery, stable lost-response retry keys in both hosts and pending
@@ -681,16 +716,16 @@ Remaining incomplete criteria are explicitly listed below.
 Result highlights:
 
 - Minimal example (`http://127.0.0.1:4175`):
-	- Builder save and publish completed with accurate status transitions: `unsaved` -> `saved - Draft saved` -> `saved - Published successfully`.
-	- Conditional-rule reference cleanup validated by adding a condition referencing `First name`, removing that field, then saving/publishing successfully without `Unexpected error`.
-	- Drag-and-drop reorder on the canvas changed ordering and marked the draft `unsaved` as expected.
-	- Rules/data/layout property tabs and representative field preview tiles remained interactive during edits.
+  - Builder save and publish completed with accurate status transitions: `unsaved` -> `saved - Draft saved` -> `saved - Published successfully`.
+  - Conditional-rule reference cleanup validated by adding a condition referencing `First name`, removing that field, then saving/publishing successfully without `Unexpected error`.
+  - Drag-and-drop reorder on the canvas changed ordering and marked the draft `unsaved` as expected.
+  - Rules/data/layout property tabs and representative field preview tiles remained interactive during edits.
 
 - Workspace example (`http://127.0.0.1:4174`):
-	- Builder edits persisted through save/publish (example: `First name` label changed to `First name verified` and remained after reload).
-	- Renderer submit succeeded after publication (`POST /api/records` 201), followed by history recall (`GET /api/records/:id/history` 200) with expected field values.
-	- History rendering now resolves and uses per-revision definition snapshots by `definitionId` so older revisions continue showing their original published labels after later form edits/publications.
-	- Reload persistence validated: form list reload, builder reopening, renderer fields, and record history flow all remained functional after page refresh.
+  - Builder edits persisted through save/publish (example: `First name` label changed to `First name verified` and remained after reload).
+  - Renderer submit succeeded after publication (`POST /api/records` 201), followed by history recall (`GET /api/records/:id/history` 200) with expected field values.
+  - History rendering now resolves and uses per-revision definition snapshots by `definitionId` so older revisions continue showing their original published labels after later form edits/publications.
+  - Reload persistence validated: form list reload, builder reopening, renderer fields, and record history flow all remained functional after page refresh.
 
 - Failed save/publish behavior checks
 
@@ -706,11 +741,11 @@ Result highlights:
 
 - No new `500 INTERNAL_ERROR` responses during the exercised create/save/publish/submit/history flows.
 - Observed statuses were 2xx/201/304 for the exercised routes including:
-	- `POST /api/forms` -> 201
-	- `PUT /api/forms/:id/draft` -> 200
-	- `POST /api/forms/:id/publish` -> 201
-	- `POST /api/records` -> 201
-	- `GET /api/records/:id/history` -> 200
+  - `POST /api/forms` -> 201
+  - `PUT /api/forms/:id/draft` -> 200
+  - `POST /api/forms/:id/publish` -> 201
+  - `POST /api/records` -> 201
+  - `GET /api/records/:id/history` -> 200
 
 - `npm install`
 
@@ -781,6 +816,7 @@ Result: success; tarballs generated and consumer fixture validated expected arti
 ## Example identities and purpose
 
 Default policy adapter behavior:
+
 - Development cookie session auth can be enabled via `FORM_DEV_AUTH=true` and `POST /dev/login`.
 - Header-based context resolution is disabled by default and only available when `FORM_DEV_ALLOW_HEADER_CONTEXT=true`.
 - Without a host adapter or dev auth mode, access is deny-by-default except optional anonymous submit when `FORM_ALLOW_ANON_SUBMIT=true`.
@@ -788,6 +824,7 @@ Default policy adapter behavior:
 ## A01-A22 acceptance evidence matrix
 
 Status legend:
+
 - PASS: implemented and verified with evidence
 - PARTIAL: implemented partially and/or not fully verified
 - BLOCKED: external blocker prevented verification
@@ -821,16 +858,19 @@ Status legend:
 ## External blockers encountered
 
 1. Local host Postgres port `5432` already occupied.
+
 - Mitigation: remapped compose Postgres to host `55432` and documented corresponding `FORM_DB_URL`.
 
 ## Security and accessibility scope completed
 
 Completed:
+
 - Basic deny-by-capability path for anonymous design endpoints.
 - Idempotency replay/payload mismatch behavior.
 - Tenant-scoped persistence path in repositories.
 
 Pending:
+
 - Full operation-by-operation authorization matrix and forged-request suite.
 - WCAG 2.2 AA automated checks.
 - Human accessibility/security review.
@@ -838,6 +878,7 @@ Pending:
 ## Package artifact evidence
 
 Generated tarballs under `tmp/packs`:
+
 - `coderlifenet-form-core-0.1.0.tgz`
 - `coderlifenet-form-postgres-0.1.0.tgz`
 - `coderlifenet-form-server-0.1.0.tgz`
@@ -845,6 +886,7 @@ Generated tarballs under `tmp/packs`:
 - `coderlifenet-form-builder-0.1.0.tgz`
 
 Consumer fixture verification:
+
 - `npm run verify:consumer` passed.
 
 ## Branch/commit/publication/license status
