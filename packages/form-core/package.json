@@ -2,6 +2,7 @@
   "name": "@coderlifenet/form-core",
   "version": "0.1.0-alpha.0",
   "private": true,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/CoderLifeNet/form-builder.git",
@@ -31,7 +32,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "nanoid": "5.1.6",
+    "nanoid": "5.1.16",
     "re2js": "1.2.0",
     "zod": "4.1.11"
   },
@@ -43,8 +44,5 @@
     "dist",
     "!dist/**/*.test.*",
     "README.md"
-  ],
-  "coderlifenetRelease": {
-    "licenseStatus": "pending-chris-decision"
-  }
+  ]
 }

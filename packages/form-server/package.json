@@ -2,6 +2,7 @@
   "name": "@coderlifenet/form-server",
   "version": "0.1.0-alpha.0",
   "private": true,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/CoderLifeNet/form-builder.git",
@@ -32,13 +33,13 @@
     "dev": "node dist/dev-server.js"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.913.0",
+    "@aws-sdk/client-s3": "3.1152.0",
     "@coderlifenet/form-core": "0.1.0-alpha.0",
     "@coderlifenet/form-postgres": "0.1.0-alpha.0",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",
     "express": "5.1.0",
-    "morgan": "1.10.1",
+    "morgan": "1.12.1",
     "zod": "4.1.11"
   },
   "devDependencies": {
@@ -55,8 +56,5 @@
     "dist",
     "!dist/**/*.test.*",
     "README.md"
-  ],
-  "coderlifenetRelease": {
-    "licenseStatus": "pending-chris-decision"
-  }
+  ]
 }

@@ -2,6 +2,7 @@
   "name": "@coderlifenet/form-postgres",
   "version": "0.1.0-alpha.0",
   "private": true,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/CoderLifeNet/form-builder.git",
@@ -46,8 +47,5 @@
     "dist",
     "!dist/**/*.test.*",
     "README.md"
-  ],
-  "coderlifenetRelease": {
-    "licenseStatus": "pending-chris-decision"
-  }
+  ]
 }

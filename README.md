@@ -79,11 +79,11 @@ npm run dev:infra:down
 ## Workspace layout
 
 - `packages/form-builder`: public package with subpath exports:
-	- `@coderlifenet/form-builder/builder`
-	- `@coderlifenet/form-builder/renderer`
-	- `@coderlifenet/form-builder/core`
-	- `@coderlifenet/form-builder/server`
-	- `@coderlifenet/form-builder/postgres`
+  - `@coderlifenet/form-builder/builder`
+  - `@coderlifenet/form-builder/renderer`
+  - `@coderlifenet/form-builder/core`
+  - `@coderlifenet/form-builder/server`
+  - `@coderlifenet/form-builder/postgres`
 - `packages/form-core`, `packages/form-react`, `packages/form-server`, `packages/form-postgres`: internal support modules used to assemble the public artifact.
 - `apps/example-minimal`: minimal host integration example.
 - `apps/example-workspace`: workspace/project-oriented host example.
@@ -143,4 +143,4 @@ Major versions are owner-controlled. Remain on `0.x.x` until Chris explicitly ap
 
 ## License
 
-A license has not been selected. Public visibility is not an open-source license grant. Select a license before package publication or outside code contributions.
+MIT. See [LICENSE](LICENSE).

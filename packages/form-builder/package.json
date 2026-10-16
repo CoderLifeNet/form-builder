@@ -2,6 +2,7 @@
   "name": "@coderlifenet/form-builder",
   "version": "0.1.0-alpha.0",
   "private": false,
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/CoderLifeNet/form-builder.git",
@@ -71,12 +72,12 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.913.0",
+    "@aws-sdk/client-s3": "3.1152.0",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",
     "express": "5.1.0",
-    "morgan": "1.10.1",
-    "nanoid": "5.1.6",
+    "morgan": "1.12.1",
+    "nanoid": "5.1.16",
     "pg": "8.16.3",
     "re2js": "1.2.0",
     "zod": "4.1.11"
@@ -103,9 +104,7 @@
   "files": [
     "dist",
     "!dist/**/*.test.*",
-    "README.md"
-  ],
-  "coderlifenetRelease": {
-    "licenseStatus": "pending-chris-decision"
-  }
+    "README.md",
+    "LICENSE"
+  ]
 }

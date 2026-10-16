@@ -31,13 +31,71 @@ Package and workflow release gates verified:
 
 Current release blockers for actual npm publication:
 
-1. License decision is still pending owner approval (`licenseStatus: pending-chris-decision`).
-2. Publication itself remains unauthorized in this sprint without explicit owner approval.
+1. Publication itself remains unauthorized in this sprint without explicit owner approval.
+2. `publish.yml` is not yet present on default branch (`main`), so workflow dispatch from GitHub UI/CLI is currently unavailable.
 
 Non-blocking observations:
 
 - Browser/test runs show sourcemap warnings for missing source files in packed dist output; current runtime/tests pass.
-- `npm ci` reports dependency vulnerabilities; no exploit validation occurred in this bounded release-readiness pass.
+- Workspace dev-tooling audit findings remain (`vite`/`vitest` chain). Runtime (`npm audit --omit=dev`) is clean after dependency updates.
+
+## Continuation: MIT approval, audit disposition, and release-path hardening (2026-10-15)
+
+Branch: `feat/ui-0.2-integration`.
+
+Scope completed in this pass:
+
+- Applied MIT consistently with approved copyright holder convention (`Copyright (c) 2026 CoderLife`).
+- Added repository `LICENSE` and package-level `packages/form-builder/LICENSE`.
+- Updated package metadata to MIT and removed pending-license markers.
+- Updated runtime dependencies with compatible security fixes.
+- Revalidated runtime audit status, artifact contents, consumer install, and local publish dry-run.
+- Updated release playbook with first-publication bootstrap and subsequent OIDC trusted-publishing flow.
+
+Key metadata changes:
+
+- `license: "MIT"` applied across workspace and package manifests.
+- Removed `coderlifenetRelease.licenseStatus` pending markers from package manifests.
+- Public package tarball include list now explicitly includes `LICENSE`.
+
+Security/audit disposition:
+
+- Before fixes:
+  - full audit: 3 critical, 2 high, 20 moderate.
+  - runtime-only audit: 1 critical, 1 high, 19 moderate.
+- Compatible runtime fixes applied:
+  - `@aws-sdk/client-s3` `3.913.0` -> `3.1152.0`
+  - `morgan` `1.10.1` -> `1.12.1`
+  - `nanoid` `5.1.6` -> `5.1.16`
+- After fixes:
+  - runtime-only audit (`npm audit --omit=dev`): 0 vulnerabilities.
+  - full audit: 4 remaining vulnerabilities, all in development tooling (`vite`/`vitest`/`tinypool`/`@vitest/mocker`), not shipped in the published runtime tarball.
+
+Validation evidence for this pass:
+
+| Command | Result |
+| --- | --- |
+| `npm run build` | PASS |
+| `npm run typecheck` | PASS |
+| `npm test` | PASS |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:integration` | PASS (`form-postgres` 6/6, `form-server` acceptance 11/11) |
+| `npm run test:browser` | PASS (14/14) |
+| `FORM_TEST_DB_URL=postgres://formbuilder:formbuilder@127.0.0.1:55432/formbuilder_test npm run test:browser:workspace` | PASS (3/3) |
+| `npm run pack:artifacts` | PASS |
+| `tar -tzf tmp/packs/coderlifenet-form-builder-0.1.0-alpha.0.tgz \| rg '^package/LICENSE$'` | PASS (`package/LICENSE` present) |
+| `npm run verify:consumer` | PASS |
+| `npm publish tmp/packs/coderlifenet-form-builder-0.1.0-alpha.0.tgz --access public --tag alpha --provenance --dry-run` | PASS (dry-run only; no publish performed) |
+
+Workflow availability check:
+
+- Attempted CLI dispatch: `gh workflow run publish.yml --ref feat/ui-0.2-integration -f release_version=0.1.0-alpha.0 -f publish=false`.
+- Result: `HTTP 404: workflow publish.yml not found on the default branch`.
+- Verified branch state: workflow exists on `feat/ui-0.2-integration`, but not on `main`.
+
+Trusted-publishing compatibility hardening:
+
+- Updated `.github/workflows/publish.yml` to install npm `11.5.1` before `npm ci`.
+- Kept workflow Node at `22.22.3` (meets npm trusted publishing minimum Node `22.14.0+`).
 
 ## Continuation: rename correctness correction on feat/ui-0.2-integration (2026-10-14)
 
