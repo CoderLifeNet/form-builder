@@ -2,7 +2,9 @@
 
 ## Current authorization
 
-This repository is in discovery and design. Documentation and repository setup are authorized. Do not implement runtime code, install dependencies, publish packages, build consumers, or modify other repositories without explicit authorization.
+This repository is in an authorized implementation sprint for the first working version. Runtime code, local dependencies, local development infrastructure, tests, examples, and documentation are authorized in this repository.
+
+Still not authorized without explicit owner approval: npm publication, release tags, production deployment, changing other repositories, and major-version promotion.
 
 Read README.md and the relevant docs before changes. Preserve the difference between approved requirements and proposed implementation choices.
 
@@ -26,4 +28,4 @@ Breaking changes during 0.x require a deliberate minor release and migration gui
 
 Organize work into coherent deliverables, not individual text/style edits. Identify frontend, service, persistence, migration, documentation, and consumer impacts. Do not edit another repository merely because a dependency is relevant.
 Track implementation, testing, and human review separately. Never mark a proposal implemented or reviewed without evidence.
-Run relevant checks once appropriate to the change; no runtime test claims while no runtime exists.
+Run relevant checks once appropriate to the change and capture command evidence.

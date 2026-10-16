@@ -1,0 +1,1053 @@
+import { useEffect, useMemo, useState, useRef, type ReactElement } from "react";
+import { FormBuilder, FormManager, ManagedForm, exportDefinition, importDefinition } from "@coderlifenet/form-builder/builder";
+import { createFormApiClient, createMutationRetryKey, createHttpUploadHandler, FormRenderer, RecordHistoryView, FormRequestError } from "@coderlifenet/form-builder/renderer";
+import type { FormDefinition } from "@coderlifenet/form-builder/core";
+import { Alert, Box, Button, CssBaseline, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, ThemeProvider, Typography, createTheme } from "@coderlifenet/ui-core";
+
+type View = "manager" | "builder" | "capture" | "preview" | "history" | "settings" | "submissions" | "readOnly";
+
+type ApiForm = {
+  id: string;
+  name: string;
+  description: string | null;
+  archived: boolean;
+  createdAt: string;
+  updatedAt: string;
+  draftRevision: number | null;
+  publishedVersion: number | null;
+  publishedDefinitionId: string | null;
+  hasUnpublishedChanges: boolean;
+  lifecycleState: "unpublished_new" | "published_clean" | "published_with_unpublished_changes" | "archived";
+};
+
+type ApiDraft = {
+  revision: number;
+  definition: FormDefinition;
+};
+
+type ApiDefinition = {
+  id: string;
+  formId: string;
+  publicationVersion: number;
+  definition: FormDefinition;
+};
+
+type ApiRecordRevision = {
+  id: string;
+  revisionNumber: number;
+  definitionId: string;
+  values: Record<string, unknown>;
+  selectedLabels?: Record<string, string>;
+  createdAt: string;
+};
+
+type ApiRecordListItem = {
+  recordId: string;
+  formId: string;
+  formName: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  currentRevisionId: string | null;
+  currentRevisionNumber: number | null;
+  currentDefinitionId: string | null;
+};
+
+type ApiRecordListResponse = {
+  items: ApiRecordListItem[];
+  nextCursor: number | null;
+};
+
+type ApiPublishedVersion = {
+  id: string;
+  formId: string;
+  publicationVersion: number;
+  publishedAt: string;
+  fieldCount: number;
+  name: string;
+};
+
+type BindingScopeType = "workspace" | "project";
+
+type ApiBinding = {
+  source: { type: BindingScopeType; id: string };
+  revision: number;
+  mode: "latest" | "pinned";
+  definitionId: string;
+  formId: string;
+} | null;
+
+const apiBase = import.meta.env.VITE_FORM_API_BASE_URL ?? "http://127.0.0.1:4010";
+const sourceMetadata = {
+  "profile.first_name": { name: "Current user first name", description: "Provided by host identity profile." },
+  "profile.last_name": { name: "Current user last name", description: "Provided by host identity profile." },
+  "request.categories": { name: "Request categories", description: "Host-provided list of allowed categories." },
+  "request.title_hint": { name: "Request title hint", description: "Optional host-generated title helper." }
+} as const;
+
+const starterDefinition: FormDefinition = {
+  metadata: {
+    formId: "workspace-demo",
+    name: "Workspace service request",
+    description: "Parent default form",
+    schemaVersion: "1.0.0"
+  },
+  sections: [
+    { id: "s1", title: "Details", order: 0 },
+    { id: "s2", title: "Request", order: 1 }
+  ],
+  fields: [
+    {
+      id: "field_first_name",
+      key: "field_first_name",
+      type: "text",
+      label: "First name",
+      sectionId: "s1",
+      row: 0,
+      width: 6,
+      required: true,
+      rules: [],
+      source: { id: "profile.first_name", version: "1", mode: "display_only" }
+    },
+    {
+      id: "field_last_name",
+      key: "field_last_name",
+      type: "text",
+      label: "Last name",
+      sectionId: "s1",
+      row: 0,
+      width: 6,
+      required: true,
+      rules: [],
+      source: { id: "profile.last_name", version: "1", mode: "display_only" }
+    },
+    {
+      id: "field_title",
+      key: "field_title",
+      type: "text",
+      label: "Request title",
+      sectionId: "s2",
+      row: 0,
+      width: 12,
+      required: true,
+      validation: { minLength: 4 },
+      rules: []
+    },
+    {
+      id: "field_category",
+      key: "field_category",
+      type: "single_select",
+      label: "Category",
+      sectionId: "s2",
+      row: 1,
+      width: 6,
+      required: true,
+      options: [],
+      source: { id: "request.categories", version: "1", mode: "refresh_on_edit", kind: "options" },
+      rules: []
+    },
+    {
+      id: "field_priority",
+      key: "field_priority",
+      type: "radio",
+      label: "Priority",
+      sectionId: "s2",
+      row: 1,
+      width: 6,
+      required: true,
+      defaultValue: "normal",
+      options: [
+        { id: "low", label: "Low" },
+        { id: "normal", label: "Normal" },
+        { id: "high", label: "High" }
+      ],
+      rules: []
+    },
+    {
+      id: "field_attachment",
+      key: "field_attachment",
+      type: "single_file",
+      label: "Attachment",
+      sectionId: "s2",
+      row: 2,
+      width: 12,
+      required: false,
+      uploadPolicy: { maxFiles: 1, maxBytes: 10 * 1024 * 1024, mediaTypes: ["application/pdf", "image/png", "image/jpeg"] },
+      rules: []
+    }
+  ],
+  dependencyVersions: {
+    "profile.first_name": "1",
+    "profile.last_name": "1",
+    "request.categories": "1"
+  }
+};
+
+const api = createFormApiClient({ baseUrl: apiBase });
+
+function formatNameTimestamp(date: Date): string {
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function renameFailureMessage(error: unknown): string {
+  if (error instanceof FormRequestError) {
+    if (error.code === "FORM_NAME_CONFLICT") {
+      return "A form with this name already exists. Choose a different name.";
+    }
+    if (error.code === "FORBIDDEN") {
+      return "You do not have permission to rename this form.";
+    }
+    if (error.code === "FORM_NOT_FOUND") {
+      return "This form no longer exists. Refresh and try again.";
+    }
+    if (error.code === "BAD_REQUEST") {
+      return error.message || "Enter a form name.";
+    }
+    return error.message || "Rename failed. Please try again.";
+  }
+
+  if (error instanceof Error) {
+    if (error.message.toLowerCase().includes("failed to fetch")) {
+      return "Unable to reach the server. Check your connection and try again.";
+    }
+    return error.message;
+  }
+
+  return "Rename failed due to an unexpected error.";
+}
+
+export function App(): ReactElement {
+  const submissionKey = useRef(createMutationRetryKey());
+  const [sourceCapabilities, setSourceCapabilities] = useState<Record<string, string>>({});
+  const [view, setView] = useState<View>("manager");
+  const [useCustomTheme, setUseCustomTheme] = useState(false);
+  const [forms, setForms] = useState<ApiForm[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeDraft, setActiveDraft] = useState<ApiDraft | null>(null);
+  const draftRevision = useRef<number>(0);
+  draftRevision.current = activeDraft?.revision ?? 0;
+  const [activeDefinition, setActiveDefinition] = useState<ApiDefinition | null>(null);
+  const [recordHistory, setRecordHistory] = useState<ApiRecordRevision[]>([]);
+  const [historyRecordId, setHistoryRecordId] = useState<string | null>(null);
+  const [historyDefinitions, setHistoryDefinitions] = useState<Record<string, FormDefinition>>({});
+  const [captureRecordId, setCaptureRecordId] = useState<string | undefined>(undefined);
+  const [captureExpectedRevision, setCaptureExpectedRevision] = useState<number | undefined>(undefined);
+  const [captureInitialValues, setCaptureInitialValues] = useState<Record<string, unknown> | undefined>(undefined);
+  const [submissions, setSubmissions] = useState<ApiRecordListItem[]>([]);
+  const [submissionsCursor, setSubmissionsCursor] = useState<number | null>(null);
+  const [submissionCreatorFilter, setSubmissionCreatorFilter] = useState("");
+  const [submissionSearch, setSubmissionSearch] = useState("");
+  const [submissionDateFrom, setSubmissionDateFrom] = useState("");
+  const [submissionDateTo, setSubmissionDateTo] = useState("");
+  const [readOnlyDefinition, setReadOnlyDefinition] = useState<ApiDefinition | null>(null);
+  const [readOnlyValues, setReadOnlyValues] = useState<Record<string, unknown>>({});
+  const [publishedVersions, setPublishedVersions] = useState<ApiPublishedVersion[]>([]);
+  const [selectedPublicationVersion, setSelectedPublicationVersion] = useState<number | "">("");
+  const [bindingScopeType, setBindingScopeType] = useState<BindingScopeType>("workspace");
+  const [bindingScopeId, setBindingScopeId] = useState("example-workspace");
+  const [bindingMode, setBindingMode] = useState<"latest" | "pinned">("latest");
+  const [bindingDefinitionId, setBindingDefinitionId] = useState("");
+  const [binding, setBinding] = useState<ApiBinding>(null);
+  const [sessionUserId, setSessionUserId] = useState("owner1");
+  const [sessionTenantId, setSessionTenantId] = useState("tenant_alpha");
+  const [status, setStatus] = useState<string>("Connecting...");
+
+  const managerForms: ManagedForm[] = useMemo(
+    () =>
+      forms.map((form) => ({
+        id: form.id,
+        name: form.name,
+        description: form.description ?? undefined,
+        archived: form.archived,
+        createdAt: form.createdAt,
+        updatedAt: form.updatedAt,
+        publishedVersion: form.publishedVersion ?? undefined,
+        hasUnpublishedChanges: form.hasUnpublishedChanges,
+        definition: activeDraft?.definition ?? starterDefinition
+      })),
+    [forms, activeDraft]
+  );
+
+  const activeForm = useMemo(
+    () => forms.find((form) => form.id === activeId) ?? null,
+    [forms, activeId]
+  );
+
+  async function login(userId: string, tenantId: string): Promise<void> {
+    await api("/dev/login", {
+      method: "POST",
+      body: JSON.stringify({ userId, tenantId })
+    });
+    setSessionUserId(userId);
+    setSessionTenantId(tenantId);
+  }
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        await login("owner1", "tenant_alpha");
+        setStatus("Connected as owner1");
+        await refreshForms();
+        await refreshCapabilities();
+        await refreshBinding();
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Unable to connect");
+      }
+    })();
+  }, []);
+
+  async function refreshCapabilities(): Promise<void> {
+    try {
+      setSourceCapabilities(await api<Record<string, string>>("/api/capabilities/sources"));
+    } catch {
+      setSourceCapabilities({});
+    }
+  }
+
+  async function refreshBinding(): Promise<void> {
+    const next = await api<ApiBinding>(`/api/bindings/${bindingScopeType}/${bindingScopeId}`);
+    setBinding(next);
+    if (next) {
+      setBindingMode(next.mode);
+      setBindingDefinitionId(next.definitionId);
+    }
+  }
+
+  useEffect(() => {
+    void refreshBinding().catch(() => {
+      setBinding(null);
+    });
+  }, [bindingScopeType, bindingScopeId]);
+
+  useEffect(() => {
+    if (!activeId) {
+      setPublishedVersions([]);
+      setSelectedPublicationVersion("");
+      return;
+    }
+    void loadPublishedVersions(activeId).catch(() => {
+      setPublishedVersions([]);
+      setSelectedPublicationVersion("");
+    });
+  }, [activeId]);
+
+  async function refreshForms(): Promise<void> {
+    const next = await api<ApiForm[]>("/api/forms?includeArchived=true");
+    setForms(next);
+    if (!activeId && next.length > 0) {
+      setActiveId(next[0].id);
+    }
+  }
+
+  async function loadPublishedVersions(formId: string): Promise<void> {
+    const versions = await api<ApiPublishedVersion[]>(`/api/forms/${formId}/versions`);
+    setPublishedVersions(versions);
+    setSelectedPublicationVersion(versions[0]?.publicationVersion ?? "");
+  }
+
+  async function loadSubmissions(reset: boolean): Promise<void> {
+    const params = new URLSearchParams();
+    if (activeId) params.set("formId", activeId);
+    params.set("pageSize", "20");
+    params.set("cursor", String(reset ? 0 : (submissionsCursor ?? 0)));
+    if (submissionCreatorFilter) params.set("createdBy", submissionCreatorFilter);
+    if (submissionSearch) params.set("query", submissionSearch);
+    if (submissionDateFrom) params.set("createdFrom", new Date(submissionDateFrom).toISOString());
+    if (submissionDateTo) params.set("createdTo", new Date(submissionDateTo).toISOString());
+
+    const listed = await api<ApiRecordListResponse>(`/api/records?${params.toString()}`);
+    setSubmissions((previous) => (reset ? listed.items : [...previous, ...listed.items]));
+    setSubmissionsCursor(listed.nextCursor);
+  }
+
+  function clearPrivateViewState(): void {
+    setActiveDraft(null);
+    setActiveDefinition(null);
+    setCaptureRecordId(undefined);
+    setCaptureExpectedRevision(undefined);
+    setCaptureInitialValues(undefined);
+    setRecordHistory([]);
+    setHistoryRecordId(null);
+    setHistoryDefinitions({});
+    setSubmissions([]);
+    setSubmissionsCursor(null);
+    setReadOnlyDefinition(null);
+    setReadOnlyValues({});
+  }
+
+  async function openBuilder(formId: string): Promise<void> {
+    const draft = await api<ApiDraft>(`/api/forms/${formId}/draft`);
+    setActiveId(formId);
+    setActiveDraft(draft);
+    setView("builder");
+  }
+
+  async function openCapture(formId: string, options?: { recordId?: string; initialValues?: Record<string, unknown>; definitionId?: string }): Promise<void> {
+    const form = await api<ApiForm>(`/api/forms/${formId}`);
+    if (!form.publishedDefinitionId) {
+      setStatus("Publish a form version before people can fill it out.");
+      return;
+    }
+
+    const chosenDefinitionId = options?.definitionId ?? (binding && binding.formId === formId ? binding.definitionId : form.publishedDefinitionId);
+    const definition = await api<ApiDefinition>(`/api/definitions/${chosenDefinitionId}`);
+    setActiveId(formId);
+    setActiveDefinition(definition);
+    setCaptureRecordId(options?.recordId);
+    setCaptureExpectedRevision(undefined);
+    setCaptureInitialValues(options?.initialValues);
+    setView("capture");
+  }
+
+  async function openCaptureFromScopeBinding(): Promise<void> {
+    const resolved = await api<ApiBinding>(`/api/bindings/${bindingScopeType}/${bindingScopeId}`);
+    if (!resolved) {
+      setStatus("No scope default is configured yet.");
+      return;
+    }
+    setBinding(resolved);
+    await openCapture(resolved.formId, { definitionId: resolved.definitionId });
+  }
+
+  async function openEditRecord(recordId: string): Promise<void> {
+    const revisions = await api<ApiRecordRevision[]>(`/api/records/${recordId}/history`);
+    if (!revisions.length) {
+      setStatus("No revisions were found for this record.");
+      return;
+    }
+    const latest = revisions[0];
+    const definition = await api<ApiDefinition>(`/api/definitions/${latest.definitionId}`);
+    setActiveId(definition.formId);
+    setCaptureRecordId(recordId);
+    setCaptureExpectedRevision(latest.revisionNumber);
+    setCaptureInitialValues(latest.values);
+    setActiveDefinition(definition);
+    setView("capture");
+  }
+
+  async function openRecordHistory(recordId: string): Promise<void> {
+    const revisions = await api<ApiRecordRevision[]>(`/api/records/${recordId}/history`);
+    if (!revisions.length) {
+      setStatus("No revisions were found for this record.");
+      return;
+    }
+    const uniqueDefinitionIds = [...new Set(revisions.map((item) => item.definitionId))];
+    const definitions = await Promise.all(
+      uniqueDefinitionIds.map(async (definitionId) => {
+        const definition = await api<ApiDefinition>(`/api/definitions/${definitionId}`);
+        return [definitionId, definition.definition] as const;
+      })
+    );
+    const latestDefinition = await api<ApiDefinition>(`/api/definitions/${revisions[0].definitionId}`);
+    setActiveDefinition(latestDefinition);
+    setHistoryRecordId(recordId);
+    setHistoryDefinitions(Object.fromEntries(definitions));
+    setRecordHistory(revisions);
+    setView("history");
+  }
+
+  async function openReadOnlyRecord(recordId: string): Promise<void> {
+    const revisions = await api<ApiRecordRevision[]>(`/api/records/${recordId}/history`);
+    if (!revisions.length) {
+      setStatus("No revisions were found for this record.");
+      return;
+    }
+    const latest = revisions[0];
+    const definition = await api<ApiDefinition>(`/api/definitions/${latest.definitionId}`);
+    setReadOnlyDefinition(definition);
+    setReadOnlyValues(latest.values);
+    setView("readOnly");
+  }
+
+  async function openPublishedVersionReadOnly(formId: string, publicationVersion: number): Promise<void> {
+    const definition = await api<ApiDefinition>(`/api/forms/${formId}/versions/${publicationVersion}`);
+    setReadOnlyDefinition(definition);
+    setReadOnlyValues({});
+    setView("readOnly");
+  }
+
+  async function createForm(): Promise<void> {
+    const created = await api<{ formId: string }>("/api/forms", {
+      method: "POST",
+      body: JSON.stringify({
+        name: `Form ${formatNameTimestamp(new Date())}`,
+        description: "Created from workspace example",
+        definition: starterDefinition
+      })
+    });
+    await refreshForms();
+    await openBuilder(created.formId);
+  }
+
+  const customTheme = createTheme({
+    palette: {
+      mode: "light",
+      primary: { main: "#0050b3" },
+      secondary: { main: "#2e7d32" },
+      background: { default: "#f6f9ff" }
+    },
+    typography: {
+      fontFamily: "'IBM Plex Sans', 'Segoe UI', sans-serif",
+      h4: { fontWeight: 700 },
+      h5: { fontWeight: 700 }
+    },
+    components: {
+      MuiButton: {
+        styleOverrides: { root: { borderRadius: 10, textTransform: "none" } }
+      },
+      MuiPaper: {
+        styleOverrides: { root: { borderRadius: 14 } }
+      }
+    }
+  });
+
+  const content = (
+    <Box component="main" sx={{ maxWidth: 1200, margin: "0 auto", p: 2.5 }}>
+      <Typography variant="h4" component="h1">Workspace and project form host example</Typography>
+      <Typography variant="body1" sx={{ mt: 1 }}>
+        End-to-end flow for designing forms, publishing versions, collecting responses, and reviewing saved history.
+      </Typography>
+      <Typography aria-live="polite" variant="body2" color="text.secondary" sx={{ mt: 1 }}>{status}</Typography>
+      <Stack direction="row" spacing={1} useFlexGap sx={{ mt: 1.5, mb: 2, flexWrap: "wrap" }}>
+        <Button type="button" variant={view === "manager" ? "contained" : "outlined"} onClick={() => setView("manager")}>Forms</Button>
+        <Button type="button" variant={view === "builder" ? "contained" : "outlined"} onClick={() => activeId && openBuilder(activeId)}>Design form</Button>
+        <Button type="button" variant={view === "capture" ? "contained" : "outlined"} onClick={() => activeId && openCapture(activeId)}>Fill out form</Button>
+        <Button type="button" variant={view === "preview" ? "contained" : "outlined"} onClick={async () => {
+          if (!activeId) {
+            setStatus("Open a form first.");
+            return;
+          }
+          const draft = await api<ApiDraft>(`/api/forms/${activeId}/draft`);
+          setActiveDraft(draft);
+          setView("preview");
+        }}>Preview draft</Button>
+        <Button type="button" variant={view === "submissions" ? "contained" : "outlined"} onClick={async () => {
+          setView("submissions");
+          await loadSubmissions(true);
+        }}>Responses</Button>
+        <Button type="button" variant={view === "settings" ? "contained" : "outlined"} onClick={() => setView("settings")}>Workspace settings</Button>
+      </Stack>
+
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5 }}>
+        <Typography variant="subtitle2">Demo tools: identity and shell settings</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          Use these controls to simulate role-based access and host shell options. They do not change reusable package behavior.
+        </Typography>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ alignItems: { md: "center" } }}>
+          <Typography variant="body2" color="text.secondary">Session identity</Typography>
+          <FormControl size="small" sx={{ minWidth: 170 }}>
+            <InputLabel id="session-user-label">User</InputLabel>
+            <Select labelId="session-user-label" label="User" value={sessionUserId} onChange={async (event) => {
+              const userId = String(event.target.value);
+              const tenantId = userId === "outsider1" ? "tenant_beta" : "tenant_alpha";
+              try {
+                clearPrivateViewState();
+                setView("manager");
+                await login(userId, tenantId);
+                await refreshForms();
+                await refreshCapabilities();
+                await refreshBinding();
+                if (activeId) {
+                  await loadPublishedVersions(activeId);
+                }
+                setStatus(`Connected as ${userId} (${tenantId})`);
+              } catch (error) {
+                setStatus(error instanceof Error ? error.message : "Unable to switch session");
+              }
+            }}>
+              <MenuItem value="owner1">owner1 (admin)</MenuItem>
+              <MenuItem value="collab1">collab1 (collaborator)</MenuItem>
+              <MenuItem value="outsider1">outsider1 (outsider)</MenuItem>
+            </Select>
+          </FormControl>
+          <Typography variant="caption" color="text.secondary">tenant: {sessionTenantId}</Typography>
+          <Button type="button" variant={useCustomTheme ? "contained" : "outlined"} color="secondary" onClick={() => setUseCustomTheme((prev) => !prev)}>
+            {useCustomTheme ? "Use custom theme" : "Use default theme"}
+          </Button>
+        </Stack>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        {view === "manager" ? (
+          <Stack spacing={1.5}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <Button type="button" variant="outlined" onClick={() => void openCaptureFromScopeBinding()}>Fill out with scope default</Button>
+              <Button type="button" variant="outlined" onClick={async () => {
+                setView("submissions");
+                await loadSubmissions(true);
+              }}>Browse responses</Button>
+            </Stack>
+            <FormManager
+              forms={managerForms}
+              onCreateForm={() => {
+                void createForm();
+              }}
+              onOpenBuilder={(formId) => {
+                void openBuilder(formId);
+              }}
+              onDuplicate={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  const suggestion = target ? `${target.name} copy` : "Copied form";
+                  const requestedName = window.prompt("Name for the duplicated form", suggestion);
+                  if (!requestedName?.trim()) {
+                    return;
+                  }
+                  const duplicated = await api<{ formId: string }>(`/api/forms/${formId}/duplicate`, {
+                    method: "POST",
+                    body: JSON.stringify({ name: requestedName.trim() })
+                  });
+                  await refreshForms();
+                  await openBuilder(duplicated.formId);
+                  setStatus("Independent draft copy opened");
+                })();
+              }}
+              onRename={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  if (!target) {
+                    setStatus("This form no longer exists. Refresh and try again.");
+                    return;
+                  }
+                  const requestedName = window.prompt("Rename form", target.name);
+                  if (requestedName === null) {
+                    return;
+                  }
+                  const trimmed = requestedName.trim();
+                  if (trimmed === target.name) {
+                    return;
+                  }
+                  try {
+                    await api(`/api/forms/${formId}`, {
+                      method: "PATCH",
+                      body: JSON.stringify({ name: trimmed })
+                    });
+                    await refreshForms();
+                    setStatus("Form renamed");
+                  } catch (error) {
+                    setStatus(renameFailureMessage(error));
+                  }
+                })();
+              }}
+              onExport={(formId) => {
+                void (async () => {
+                  const exported = await api<{ definition: FormDefinition; dependencies: Record<string, string> }>(`/api/forms/${formId}/export`);
+                  const blob = new Blob([exportDefinition(exported.definition)], { type: "application/json" });
+                  const url = URL.createObjectURL(blob);
+                  const link = document.createElement("a");
+                  link.href = url;
+                  link.download = `form-${formId}.json`;
+                  link.click();
+                  URL.revokeObjectURL(url);
+                  setStatus("Form exported");
+                })();
+              }}
+              onArchiveToggle={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  if (!target) {
+                    return;
+                  }
+                  await api(`/api/forms/${formId}/${target.archived ? "restore" : "archive"}`, { method: "POST" });
+                  await refreshForms();
+                  setStatus(target.archived ? "Form restored" : "Form archived");
+                })();
+              }}
+              onOpenVersionHistory={(formId) => {
+                void (async () => {
+                  setActiveId(formId);
+                  await loadPublishedVersions(formId);
+                  setView("settings");
+                  setStatus("Viewing published form versions");
+                })();
+              }}
+              onDeleteDraft={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  if (!target || target.publishedVersion || target.draftRevision === null) {
+                    return;
+                  }
+                  const confirmed = window.confirm("Delete draft?\n\nThis removes this never-published draft form. Published versions and responses do not exist for this form.");
+                  if (!confirmed) {
+                    return;
+                  }
+                  await api(`/api/forms/${formId}/draft`, {
+                    method: "DELETE",
+                    body: JSON.stringify({ expectedRevision: target.draftRevision })
+                  });
+                  if (activeId === formId) {
+                    clearPrivateViewState();
+                    setView("manager");
+                    setActiveId(null);
+                  }
+                  await refreshForms();
+                  setStatus("Draft-only form deleted");
+                })();
+              }}
+              onDiscardUnpublishedChanges={(formId) => {
+                void (async () => {
+                  const target = forms.find((form) => form.id === formId);
+                  if (!target || !target.publishedVersion || !target.hasUnpublishedChanges || target.draftRevision === null) {
+                    return;
+                  }
+                  const confirmed = window.confirm("Discard unpublished changes?\n\nThis removes only the working draft changes and keeps published versions, responses, and history.");
+                  if (!confirmed) {
+                    return;
+                  }
+                  const discarded = await api<{ revision: number }>(`/api/forms/${formId}/discard-unpublished`, {
+                    method: "POST",
+                    body: JSON.stringify({ expectedRevision: target.draftRevision })
+                  });
+                  if (activeId === formId) {
+                    const draft = await api<ApiDraft>(`/api/forms/${formId}/draft`);
+                    draftRevision.current = discarded.revision;
+                    setActiveDraft(draft);
+                  }
+                  await refreshForms();
+                  setStatus("Unpublished changes discarded");
+                })();
+              }}
+              onImportAsNew={() => {
+                void (async () => {
+                  const input = window.prompt("Paste exported form JSON");
+                  if (!input) {
+                    return;
+                  }
+                  const imported = importDefinition(input);
+                  await api("/api/forms/import-as-new", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      name: `${imported.metadata.name} imported`,
+                      description: imported.metadata.description,
+                      envelope: { formatVersion: 1, definition: imported, dependencies: imported.dependencyVersions }
+                    })
+                  });
+                  await refreshForms();
+                  setStatus("Form imported");
+                })();
+              }}
+            />
+          </Stack>
+        ) : null}
+
+        {view === "settings" ? (
+          <Stack spacing={2}>
+            <Typography variant="h6">Default form version by scope</Typography>
+            <Typography variant="body2" color="text.secondary">
+              Choose which published form version people receive by default in each scope. A project can inherit workspace defaults or override them.
+            </Typography>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <FormControl size="small" sx={{ minWidth: 180 }}>
+                <InputLabel id="scope-type-label">Scope level</InputLabel>
+                <Select labelId="scope-type-label" label="Scope level" value={bindingScopeType} onChange={(event) => {
+                  const nextType = event.target.value as BindingScopeType;
+                  setBindingScopeType(nextType);
+                  setBindingScopeId(nextType === "workspace" ? "example-workspace" : "example-project");
+                  setBinding(null);
+                }}>
+                  <MenuItem value="workspace">Workspace</MenuItem>
+                  <MenuItem value="project">Project</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 220 }}>
+                <InputLabel id="scope-id-label">Scope ID</InputLabel>
+                <Select labelId="scope-id-label" label="Scope ID" value={bindingScopeId} onChange={(event) => setBindingScopeId(String(event.target.value))}>
+                  <MenuItem value={bindingScopeType === "workspace" ? "example-workspace" : "example-project"}>{bindingScopeType === "workspace" ? "example-workspace" : "example-project"}</MenuItem>
+                </Select>
+              </FormControl>
+              <Button type="button" variant="outlined" onClick={async () => {
+                try {
+                  await refreshBinding();
+                  setStatus("Scope binding loaded");
+                } catch (error) {
+                  setStatus(error instanceof Error ? error.message : "Binding read failed");
+                }
+              }}>Load binding</Button>
+            </Stack>
+
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <FormControl size="small" sx={{ minWidth: 180 }}>
+                <InputLabel id="binding-mode-label">Default version behavior</InputLabel>
+                <Select labelId="binding-mode-label" label="Default version behavior" value={bindingMode} onChange={(event) => setBindingMode(event.target.value as "latest" | "pinned")}>
+                  <MenuItem value="latest">Always latest published version</MenuItem>
+                  <MenuItem value="pinned">Pin a specific published version</MenuItem>
+                </Select>
+              </FormControl>
+              <FormControl size="small" sx={{ minWidth: 280 }}>
+                <InputLabel id="binding-definition-label">Pinned definition</InputLabel>
+                <Select labelId="binding-definition-label" label="Pinned definition" value={bindingDefinitionId} onChange={(event) => setBindingDefinitionId(String(event.target.value))}>
+                  {forms.filter(form => form.publishedDefinitionId).map(form => (
+                    <MenuItem key={form.id} value={form.publishedDefinitionId ?? ""}>{form.name} ({form.publishedDefinitionId})</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            </Stack>
+
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <Button type="button" variant="contained" onClick={async () => {
+                try {
+                  const selectedForm = forms.find(form => form.publishedDefinitionId === bindingDefinitionId) ?? forms.find(form => form.publishedDefinitionId);
+                  if (!selectedForm) {
+                    setStatus("Publish at least one form before saving a binding.");
+                    return;
+                  }
+                  const payload = {
+                    formId: selectedForm.id,
+                    mode: bindingMode,
+                    definitionId: bindingMode === "pinned" ? bindingDefinitionId : undefined,
+                    expectedRevision: binding?.source.type === bindingScopeType && binding.source.id === bindingScopeId ? binding.revision : 0
+                  };
+                  await api(`/api/bindings/${bindingScopeType}/${bindingScopeId}`, { method: "PUT", body: JSON.stringify(payload) });
+                  await refreshBinding();
+                  setStatus(`Saved ${bindingScopeType} binding (${bindingMode}).`);
+                } catch (error) {
+                  setStatus(error instanceof Error ? error.message : "Binding save failed");
+                }
+              }}>Save default</Button>
+              <Button type="button" variant="outlined" disabled={bindingScopeType !== "project" || !binding} onClick={async () => {
+                if (!binding) return;
+                try {
+                  await api(`/api/bindings/${bindingScopeType}/${bindingScopeId}`, { method: "DELETE", body: JSON.stringify({ expectedRevision: binding.revision }) });
+                  await refreshBinding();
+                  setStatus("Project override reset to inherited defaults.");
+                } catch (error) {
+                  setStatus(error instanceof Error ? error.message : "Binding reset failed");
+                }
+              }}>Reset project to workspace default</Button>
+            </Stack>
+
+            <Typography variant="body2" color="text.secondary">
+              Active default: {binding ? `${binding.source.type}/${binding.source.id} -> ${binding.mode} (${binding.definitionId}) rev ${binding.revision}` : "none"}
+            </Typography>
+
+            <Stack spacing={1}>
+              <Typography variant="h6">Published form versions</Typography>
+              <Typography variant="caption" color="text.secondary">Use this for form design history. Response revision history is available from each response in the Responses view.</Typography>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+                <FormControl size="small" sx={{ minWidth: 260 }}>
+                  <InputLabel id="published-version-label">Version</InputLabel>
+                  <Select
+                    labelId="published-version-label"
+                    label="Version"
+                    value={selectedPublicationVersion}
+                    onChange={(event) => setSelectedPublicationVersion(Number(event.target.value))}
+                  >
+                    {publishedVersions.map((version) => (
+                      <MenuItem key={version.id} value={version.publicationVersion}>
+                        v{version.publicationVersion} · {new Date(version.publishedAt).toLocaleString()} · {version.fieldCount} fields
+                      </MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <Button
+                  type="button"
+                  variant="outlined"
+                  disabled={!activeId || selectedPublicationVersion === ""}
+                  onClick={async () => {
+                    if (!activeId || selectedPublicationVersion === "") return;
+                    await openPublishedVersionReadOnly(activeId, Number(selectedPublicationVersion));
+                  }}
+                >
+                  Open selected form version
+                </Button>
+              </Stack>
+            </Stack>
+          </Stack>
+        ) : null}
+
+        {activeDraft && activeId ? (
+          <Box hidden={view !== "builder"}>
+          <FormBuilder
+            initialDefinition={activeDraft.definition}
+            sourceCapabilities={sourceCapabilities}
+            sourceMetadata={sourceMetadata}
+            onSaved={() => setView("manager")}
+            onReloadDraft={async () => { const draft = await api<ApiDraft>(`/api/forms/${activeId}/draft`); draftRevision.current = draft.revision; setActiveDraft(draft); return draft.definition; }}
+            onSaveDraft={async (nextDefinition) => {
+              const saved = await api<{ revision: number }>(`/api/forms/${activeId}/draft`, {
+                method: "PUT",
+                body: JSON.stringify({ expectedRevision: draftRevision.current, definition: nextDefinition })
+              });
+              draftRevision.current = saved.revision;
+              setActiveDraft({ revision: saved.revision, definition: nextDefinition });
+              await refreshForms();
+              setStatus(`Draft saved r${saved.revision}`);
+            }}
+            onPublish={async (nextDefinition) => {
+              const saved = await api<{ revision: number }>(`/api/forms/${activeId}/draft`, {
+                method: "PUT",
+                body: JSON.stringify({ expectedRevision: draftRevision.current, definition: nextDefinition })
+              });
+              draftRevision.current = saved.revision;
+              setActiveDraft({ revision: saved.revision, definition: nextDefinition });
+              const published = await api<{ definitionId: string; publicationVersion: number }>(`/api/forms/${activeId}/publish`, {
+                method: "POST",
+                body: JSON.stringify({ expectedRevision: saved.revision })
+              });
+              draftRevision.current = saved.revision;
+              setActiveDraft({ revision: saved.revision, definition: nextDefinition });
+              await refreshForms();
+              setStatus(`Published v${published.publicationVersion}`);
+            }}
+            publishedVersion={activeForm?.publishedVersion ?? undefined}
+            archived={activeForm?.archived ?? false}
+            hasUnpublishedChanges={activeForm?.hasUnpublishedChanges ?? false}
+          />
+          </Box>
+        ) : null}
+
+        {view === "preview" && activeDraft ? (
+          <Stack spacing={1.5}>
+            <Typography variant="h6">Draft preview (no persistence)</Typography>
+            <Typography variant="caption" color="text.secondary">This preview uses the draft renderer and never saves responses or uploads.</Typography>
+            <FormRenderer
+              key={`preview:${activeDraft.definition.metadata.formId}`}
+              renderIdentity={`preview:${sessionTenantId}:${activeDraft.definition.metadata.formId}`}
+              definition={activeDraft.definition}
+              mode="preview"
+            />
+          </Stack>
+        ) : null}
+
+        {view === "capture" && activeDefinition && activeId ? (
+          <FormRenderer
+            key={`${sessionTenantId}:${activeId}:${activeDefinition.id}:${captureRecordId ?? "new"}`}
+            renderIdentity={`${sessionTenantId}:${activeId}:${activeDefinition.id}:${captureRecordId ?? "new"}`}
+            uploadFile={createHttpUploadHandler(apiBase, activeId, activeDefinition.id)}
+            definition={activeDefinition.definition}
+            initialValues={captureInitialValues}
+            optionSourceResolver={async (sourceId, values, signal) => {
+              const field = activeDefinition.definition.fields.find(field => field.source?.id === sourceId);
+              if (!field) throw new Error("Source field not found");
+              const response = await fetch(`${apiBase}/api/definitions/${activeDefinition.id}/sources/${field.id}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }), signal });
+              if (!response.ok) throw new Error("Source request failed");
+              return (await response.json()).value;
+            }}
+            sourceResolver={async (sourceId, values, signal) => {
+              const field = activeDefinition.definition.fields.find(candidate => candidate.source?.id === sourceId && candidate.source.kind !== "options");
+              if (!field) return undefined;
+              const response = await fetch(`${apiBase}/api/definitions/${activeDefinition.id}/sources/${field.id}`, { method: "POST", credentials: "include", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }), signal });
+              if (!response.ok) throw new Error("Source request failed");
+              return (await response.json()).value;
+            }}
+            mode={captureRecordId ? "edit" : "new"}
+            onSubmit={async (values) => {
+              const editingRecordId = captureRecordId;
+              const payload = JSON.stringify({
+                  formId: activeId,
+                  definitionId: activeDefinition.id,
+                  recordId: editingRecordId,
+                  expectedRevision: editingRecordId ? captureExpectedRevision : undefined,
+                  binding: binding ? { scopeType: bindingScopeType, scopeId: bindingScopeId, revision: binding.revision, definitionId: binding.definitionId } : undefined,
+                  values,
+                  uploadIds: activeDefinition.definition.fields.filter(field => field.type === "single_file" || field.type === "multi_file").flatMap(field => Array.isArray(values[field.id]) ? values[field.id] as string[] : values[field.id] ? [String(values[field.id])] : [])
+                });
+              const result = await api<{ recordId: string }>("/api/records", {
+                method: "POST",
+                headers: {
+                  "idempotency-key": submissionKey.current.keyFor(payload)
+                },
+                body: payload
+              });
+              submissionKey.current.committed();
+              setCaptureRecordId(result.recordId);
+              setCaptureExpectedRevision((previous) => (editingRecordId ? (previous ?? 0) + 1 : 1));
+              setCaptureInitialValues(values);
+              await loadSubmissions(true);
+              setStatus(`Record saved: ${result.recordId}`);
+            }}
+          />
+        ) : null}
+
+        {view === "submissions" ? (
+          <Stack spacing={1.5}>
+            <Typography variant="h6">Responses</Typography>
+            <Typography variant="body2" color="text.secondary">Browse saved responses, then choose a response-specific action: view, edit, or revision history.</Typography>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+              <TextField size="small" label="Created by" value={submissionCreatorFilter} onChange={(event) => setSubmissionCreatorFilter(event.target.value)} />
+              <TextField size="small" label="Record or form search" value={submissionSearch} onChange={(event) => setSubmissionSearch(event.target.value)} />
+              <TextField size="small" type="date" label="From" slotProps={{ inputLabel: { shrink: true } }} value={submissionDateFrom} onChange={(event) => setSubmissionDateFrom(event.target.value)} />
+              <TextField size="small" type="date" label="To" slotProps={{ inputLabel: { shrink: true } }} value={submissionDateTo} onChange={(event) => setSubmissionDateTo(event.target.value)} />
+              <Button type="button" variant="contained" onClick={() => void loadSubmissions(true)}>Apply filters</Button>
+            </Stack>
+            {submissions.map((submission) => (
+              <Paper key={submission.recordId} variant="outlined" sx={{ p: 1.5 }} data-testid={`submission-${submission.recordId}`}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ justifyContent: "space-between" }}>
+                  <Box>
+                    <Typography variant="subtitle1">{submission.recordId}</Typography>
+                    <Typography variant="body2" color="text.secondary">{submission.formName} · created by {submission.createdBy}</Typography>
+                    <Typography variant="body2" color="text.secondary">Created {new Date(submission.createdAt).toLocaleString()} · Updated {new Date(submission.updatedAt).toLocaleString()}</Typography>
+                    <Typography variant="body2" color="text.secondary">Revision {submission.currentRevisionNumber ?? "-"}</Typography>
+                  </Box>
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                    <Button type="button" variant="outlined" onClick={() => void openReadOnlyRecord(submission.recordId)}>View response</Button>
+                    <Button type="button" variant="outlined" onClick={() => void openEditRecord(submission.recordId)}>Edit response</Button>
+                    <Button type="button" variant="outlined" onClick={() => void openRecordHistory(submission.recordId)}>Response history</Button>
+                  </Stack>
+                </Stack>
+              </Paper>
+            ))}
+            {!submissions.length ? <Alert severity="info">{submissionCreatorFilter || submissionSearch || submissionDateFrom || submissionDateTo ? "No responses match the current filters. Adjust or clear filters to widen results." : "No responses yet. Fill out the form once to create the first response."}</Alert> : null}
+            <Button type="button" variant="outlined" disabled={submissionsCursor === null} onClick={() => void loadSubmissions(false)}>Load more</Button>
+          </Stack>
+        ) : null}
+
+        {view === "readOnly" && readOnlyDefinition ? (
+          <Stack spacing={1.5}>
+            <Typography variant="h6">Response view (read-only)</Typography>
+            <Typography variant="caption" color="text.secondary">This shows saved response values without edit controls.</Typography>
+            <FormRenderer
+              key={`readonly:${readOnlyDefinition.id}`}
+              renderIdentity={`readonly:${sessionTenantId}:${readOnlyDefinition.id}`}
+              definition={readOnlyDefinition.definition}
+              initialValues={readOnlyValues}
+              mode="read_only"
+            />
+          </Stack>
+        ) : null}
+
+        {view === "history" && recordHistory.length > 0 && activeDefinition ? (
+          <Stack spacing={1.5}>
+            <Typography variant="h6">Response revision history</Typography>
+            <Typography variant="caption" color="text.secondary">This history is for one response record. Form design version history is in Workspace settings.</Typography>
+            <Button type="button" variant="outlined" onClick={async () => {
+              if (!historyRecordId) {
+                setStatus("No history record is available to edit.");
+                return;
+              }
+              await openEditRecord(historyRecordId);
+            }}>Edit this response</Button>
+            <RecordHistoryView
+              definition={activeDefinition.definition}
+              revisions={recordHistory.map((item) => ({
+                id: item.id,
+                revisionNumber: item.revisionNumber,
+                savedAt: item.createdAt,
+                values: item.values,
+                selectedLabels: item.selectedLabels,
+                definition: historyDefinitions[item.definitionId]
+              }))}
+            />
+          </Stack>
+        ) : null}
+      </Paper>
+    </Box>
+  );
+
+  if (useCustomTheme) {
+    return (
+      <ThemeProvider theme={customTheme}>
+        <CssBaseline />
+        {content}
+      </ThemeProvider>
+    );
+  }
+
+  return content;
+}

@@ -28,7 +28,7 @@ Track each decision separately from delivery evidence. "Implemented" requires re
 
 ## Open choices before implementation
 
-- Final product/package names, license, package boundaries and tooling.
+- Final product/package names, package boundaries and tooling.
 - Real shared UI export/peer compatibility and provider arrangement.
 - HTTP mounting framework, storage/ORM/migration tools and upload reference setup.
 - Condition semantics, protected values and rules for disabled/hidden required fields.

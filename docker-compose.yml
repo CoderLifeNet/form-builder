@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:17.2
+    container_name: formbuilder-postgres
+    environment:
+      POSTGRES_DB: formbuilder
+      POSTGRES_USER: formbuilder
+      POSTGRES_PASSWORD: formbuilder
+    ports:
+      - "55432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

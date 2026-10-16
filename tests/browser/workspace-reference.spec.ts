@@ -1,0 +1,389 @@
+import { expect, test } from "@playwright/test";
+
+const apiBaseUrl = "http://127.0.0.1:4011";
+
+const starterDefinition = {
+  metadata: {
+    formId: "workspace-seeded",
+    name: "Workspace seeded form",
+    schemaVersion: "1.0.0"
+  },
+  sections: [
+    { id: "s1", title: "Details", order: 0 },
+    { id: "s2", title: "Follow-up", order: 1 }
+  ],
+  fields: [
+    { id: "field_title", key: "field_title", type: "text", label: "Title", sectionId: "s1", row: 0, width: 12, required: true, rules: [] },
+    { id: "field_category", key: "field_category", type: "single_select", label: "Category", sectionId: "s1", row: 1, width: 12, required: false, options: [{ id: "equipment", label: "Equipment" }], rules: [] },
+    { id: "field_follow_up", key: "field_follow_up", type: "multiline", label: "Follow-up details", sectionId: "s2", row: 0, width: 12, required: false, rules: [] }
+  ],
+  dependencyVersions: {}
+};
+
+test("workspace reference host supports persisted submissions, read-only rendering, and version discovery", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const seeded = await page.evaluate(async ({ definition, apiBaseUrl }) => {
+    const requestJson = async (input: string, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(`Seed request failed (${response.status}) for ${input}: ${JSON.stringify(body)}`);
+      }
+      return body as Record<string, unknown>;
+    };
+
+    const suffix = Date.now();
+
+    await requestJson(`${apiBaseUrl}/dev/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+    });
+
+    const formName = `Seeded form ${suffix}`;
+    const created = await requestJson(`${apiBaseUrl}/api/forms`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: formName,
+        description: "Seeded for workspace browser flow",
+        definition
+      })
+    });
+
+    const publishedV1 = await requestJson(`${apiBaseUrl}/api/forms/${created.formId}/publish`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: created.draftRevision })
+    });
+
+    const ownerSubmissionBody = await requestJson(`${apiBaseUrl}/api/records`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", "idempotency-key": `seed_owner_${Date.now()}` },
+      body: JSON.stringify({
+        formId: created.formId,
+        definitionId: publishedV1.definitionId,
+        values: {
+          field_title: "Owner seeded record",
+          field_category: "equipment"
+        }
+      })
+    });
+
+    await requestJson(`${apiBaseUrl}/dev/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "collab1", tenantId: "tenant_alpha" })
+    });
+
+    const collabSubmissionBody = await requestJson(`${apiBaseUrl}/api/records`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", "idempotency-key": `seed_collab_${Date.now()}` },
+      body: JSON.stringify({
+        formId: created.formId,
+        definitionId: publishedV1.definitionId,
+        values: {
+          field_title: "Collaborator seeded record",
+          field_category: "equipment",
+          field_follow_up: "Details for v1"
+        }
+      })
+    });
+
+    await requestJson(`${apiBaseUrl}/dev/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+    });
+
+    const draft = await requestJson(`${apiBaseUrl}/api/forms/${created.formId}/draft`, {
+      method: "GET",
+      credentials: "include"
+    });
+
+    const nextDefinition = {
+      ...(draft.definition as Record<string, unknown>),
+      fields: [
+        ...((draft.definition as { fields: Array<Record<string, unknown>> }).fields),
+        {
+          id: "field_extra",
+          key: "field_extra",
+          type: "text",
+          label: "Added in v2",
+          sectionId: "s2",
+          row: 1,
+          width: 12,
+          required: false,
+          rules: []
+        }
+      ]
+    };
+
+    const savedDraft = await requestJson(`${apiBaseUrl}/api/forms/${created.formId}/draft`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: draft.revision, definition: nextDefinition })
+    });
+
+    const publishedV2 = await requestJson(`${apiBaseUrl}/api/forms/${created.formId}/publish`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ expectedRevision: savedDraft.revision })
+    });
+
+    return {
+      formName,
+      ownerRecordId: String(ownerSubmissionBody.recordId),
+      collabRecordId: String(collabSubmissionBody.recordId),
+      version1: Number(publishedV1.publicationVersion),
+      version2: Number(publishedV2.publicationVersion)
+    };
+  }, { definition: starterDefinition, apiBaseUrl });
+
+  await page.reload();
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Forms" })).toBeVisible();
+  await page.getByRole("button", { name: seeded.formName }).click();
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
+
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
+  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+  await expect(page.getByText(seeded.ownerRecordId)).toBeVisible();
+  await expect(page.getByText(seeded.collabRecordId)).toBeVisible();
+
+  const firstCardId = await page.locator("[data-testid^='submission-']").first().getAttribute("data-testid");
+  expect(firstCardId).not.toBe(`submission-${seeded.ownerRecordId}`);
+
+  const ownerRow = page.getByTestId(`submission-${seeded.ownerRecordId}`);
+
+  await ownerRow.getByRole("button", { name: "View response", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response view (read-only)" })).toBeVisible();
+  await expect(page.getByLabel("Title")).toHaveValue("Owner seeded record");
+
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
+  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+
+  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "Response history", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response revision history" })).toBeVisible();
+  await page.getByRole("button", { name: "Edit this response", exact: true }).click();
+  await page.getByLabel("Title").fill("Owner edited title via history");
+  await page.getByRole("button", { name: "Submit", exact: true }).click();
+
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
+  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+
+  await page.getByTestId(`submission-${seeded.collabRecordId}`).getByRole("button", { name: "View response", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response view (read-only)" })).toBeVisible();
+  await expect(page.getByLabel("Title")).toHaveValue("Collaborator seeded record");
+
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
+  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+  await page.getByTestId(`submission-${seeded.ownerRecordId}`).getByRole("button", { name: "Response history", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response revision history" })).toBeVisible();
+  await expect(page.getByText("Owner edited title via history")).toBeVisible();
+
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
+  await page.reload();
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+  await page.getByRole("button", { name: seeded.formName, exact: true }).click();
+  await page.getByRole("button", { name: "Responses", exact: true }).click();
+  await page.getByRole("button", { name: "Apply filters", exact: true }).click();
+  await expect(page.getByText(seeded.ownerRecordId)).toBeVisible();
+  await expect(page.getByText(seeded.collabRecordId)).toBeVisible();
+
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Published form versions" })).toBeVisible();
+  await page.getByRole("combobox", { name: "Version", exact: true }).click();
+  await page.getByRole("option", { name: new RegExp(`^v${seeded.version1}\\b`) }).click();
+  await page.getByRole("button", { name: "Open selected form version", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Response view (read-only)" })).toBeVisible();
+  await expect(page.getByLabel("Added in v2")).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Workspace settings", exact: true }).click();
+  await page.getByRole("combobox", { name: "Version", exact: true }).click();
+  await page.getByRole("option", { name: new RegExp(`^v${seeded.version2}\\b`) }).click();
+  await page.getByRole("button", { name: "Open selected form version", exact: true }).click();
+  await expect(page.getByLabel("Added in v2")).toBeVisible();
+});
+
+test("workspace manager exposes version history and publish cancellation leaves versions unchanged", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const seeded = await page.evaluate(async ({ definition, apiBaseUrl }) => {
+    const requestJson = async (input: string, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(`Seed request failed (${response.status}) for ${input}: ${JSON.stringify(body)}`);
+      }
+      return body as Record<string, unknown>;
+    };
+
+    await requestJson(`${apiBaseUrl}/dev/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+    });
+
+    const formName = `Publish cancel ${Date.now()}`;
+    const created = await requestJson(`${apiBaseUrl}/api/forms`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: formName,
+        description: "Seeded for publish cancel flow",
+        definition
+      })
+    });
+
+    const published = await requestJson(`${apiBaseUrl}/api/forms/${created.formId}/publish`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json", "idempotency-key": `publish_seed_${Date.now()}` },
+      body: JSON.stringify({ expectedRevision: created.draftRevision })
+    });
+
+    return {
+      formId: String(created.formId),
+      formName,
+      initialVersion: Number(published.publicationVersion)
+    };
+  }, { definition: starterDefinition, apiBaseUrl });
+
+  await page.reload();
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const formButton = page.getByRole("button", { name: seeded.formName, exact: true });
+  await formButton.click();
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
+
+  const formRow = page.locator("li").filter({ has: page.getByRole("button", { name: seeded.formName, exact: true }) }).first();
+  await formRow.getByRole("button", { name: "Version history", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Published form versions" })).toBeVisible();
+
+  await page.getByRole("button", { name: "Forms", exact: true }).click();
+  await page.getByRole("button", { name: seeded.formName, exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Form designer", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish version", exact: true })).toBeDisabled();
+  await expect(page.getByText("There are no unpublished changes to publish.")).toBeVisible();
+
+  await page.getByRole("textbox", { name: "Label" }).fill("Title updated but canceled publish");
+
+  page.once("dialog", async (dialog) => {
+    expect(dialog.message()).toContain("Publish a new version?");
+    await dialog.dismiss();
+  });
+  await page.getByRole("button", { name: "Publish version", exact: true }).click();
+
+  const versions = await page.evaluate(async ({ apiBaseUrl, formId }) => {
+    const response = await fetch(`${apiBaseUrl}/api/forms/${formId}/versions`, { credentials: "include" });
+    if (!response.ok) {
+      throw new Error(`Version list failed with status ${response.status}`);
+    }
+    return (await response.json()) as Array<{ publicationVersion: number }>;
+  }, { apiBaseUrl, formId: seeded.formId });
+  expect(versions).toHaveLength(1);
+  expect(versions[0]?.publicationVersion).toBe(seeded.initialVersion);
+});
+
+test("workspace rename handles cancellation and surfaces conflict failures without unhandled errors", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const seeded = await page.evaluate(async ({ definition, apiBaseUrl }) => {
+    const requestJson = async (input: string, init?: RequestInit) => {
+      const response = await fetch(input, init);
+      const body = await response.json();
+      if (!response.ok) {
+        throw new Error(`Seed request failed (${response.status}) for ${input}: ${JSON.stringify(body)}`);
+      }
+      return body as Record<string, unknown>;
+    };
+
+    await requestJson(`${apiBaseUrl}/dev/login`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ userId: "owner1", tenantId: "tenant_alpha" })
+    });
+
+    const formName = `Rename flow ${Date.now()}`;
+    const created = await requestJson(`${apiBaseUrl}/api/forms`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: formName,
+        description: "Seeded for rename error handling",
+        definition
+      })
+    });
+
+    return {
+      formId: String(created.formId),
+      formName
+    };
+  }, { definition: starterDefinition, apiBaseUrl });
+
+  await page.reload();
+  await expect(page.getByText("Connected as owner1")).toBeVisible();
+
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => {
+    pageErrors.push(error);
+  });
+
+  const renamePatchRequests: string[] = [];
+  page.on("request", (requestEvent) => {
+    if (requestEvent.method() === "PATCH" && requestEvent.url().endsWith(`/api/forms/${seeded.formId}`)) {
+      renamePatchRequests.push(requestEvent.url());
+    }
+  });
+
+  const formRow = page.locator("li").filter({ has: page.getByRole("button", { name: seeded.formName, exact: true }) }).first();
+
+  page.once("dialog", async (dialog) => {
+    await dialog.dismiss();
+  });
+  await formRow.getByRole("button", { name: "Rename", exact: true }).click();
+  await expect.poll(() => renamePatchRequests.length).toBe(0);
+
+  await page.route(`**/api/forms/${seeded.formId}`, async (route, requestEvent) => {
+    if (requestEvent.method() === "PATCH") {
+      await route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          code: "FORM_NAME_CONFLICT",
+          message: "A form with this name already exists in the current tenant.",
+          fieldErrors: []
+        })
+      });
+      return;
+    }
+    await route.continue();
+  });
+
+  page.once("dialog", async (dialog) => {
+    await dialog.accept("Conflicting form name");
+  });
+  await formRow.getByRole("button", { name: "Rename", exact: true }).click();
+
+  await expect(page.getByText("A form with this name already exists. Choose a different name.")).toBeVisible();
+  expect(pageErrors).toHaveLength(0);
+});

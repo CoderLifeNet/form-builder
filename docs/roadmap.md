@@ -15,7 +15,7 @@ Only repository/documentation setup is currently authorized. Phases below are pl
 
 README, indexed requirements, architecture proposals, decision log, roadmap, contributor instructions and release policy.
 No implementation scaffold or claimed package availability.
-Repository description/settings require tooling support. License remains undecided.
+Repository description/settings require tooling support. License is approved as MIT.
 
 ## 1. Design and compatibility investigation
 
@@ -48,7 +48,7 @@ Acceptance: keyboard-accessible builder operations; malicious/oversized import r
 
 Verified reference application, setup/database migration instructions, host identity/permissions, compatibility matrix, npm README and CoderLifeNet documentation content.
 Acceptance: end-to-end design → publish → capture → reopen → edit → history; upload access/cleanup; upgrade from previous supported schema; WCAG-oriented automated checks plus manual review.
-Select license and verify package metadata before publishing. Owner approves release/version. 1.0.0 requires separate explicit approval, not completion of a phase.
+Verify package metadata and license inclusion before publishing. Owner approves release/version. 1.0.0 requires separate explicit approval, not completion of a phase.
 
 ## Later or separately scoped
 

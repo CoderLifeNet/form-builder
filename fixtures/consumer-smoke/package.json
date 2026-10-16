@@ -1,0 +1,10 @@
+{
+  "name": "consumer-smoke",
+  "private": true,
+  "license": "MIT",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "verify": "node src/verify.js"
+  }
+}

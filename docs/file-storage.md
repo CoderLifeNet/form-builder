@@ -55,3 +55,27 @@ Core/browser packages must not eagerly require a storage SDK. Preserve database/
 ## Unreleased clean-slate clarification
 
 Remove abandoned MinIO/LocalStack code/configuration rather than retaining deprecated paths. Project-scoped disposable development data can be reset/reseeded; unrelated resources and developer work must remain intact. Consolidate unreleased prototype schemas where appropriate while retaining migration runner/ledger/locking/status and tests. Do not manufacture artificial upgrade paths. Product form/record history remains required.
+
+## Runtime adapter contract and endpoints
+
+Server storage selection is controlled through environment variables:
+
+- `FORM_UPLOAD_PROVIDER=filesystem|s3`
+- `FORM_UPLOAD_DIR` for filesystem mode
+- `FORM_S3_*` values for S3 mode
+
+Upload endpoints require capability checks:
+
+- `POST /api/forms/:formId/uploads`
+- `GET /api/uploads/:uploadId/download`
+- `DELETE /api/uploads/:uploadId`
+
+Development session auth is opt-in (`FORM_DEV_AUTH=true`) and exposes `POST /dev/login` only in that mode.
+
+A custom storage provider must implement:
+
+- `storeObject({ tenantId, uploadId, fileName, contentType, stream })`
+- `getObject({ tenantId, objectKey, contentType, sizeBytes })`
+- `deleteObject({ tenantId, objectKey })`
+
+See `packages/form-server/src/storage/types.ts` for the exact interface.
