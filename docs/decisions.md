@@ -41,3 +41,14 @@ Track each decision separately from delivery evidence. "Implemented" requires re
 
 Record the date, owner decision and reason when changing status or superseding a policy. Keep superseded decisions traceable.
 Record implementation commits/PRs, validation evidence and human review independently. No conversation approval of requirements counts as testing or review of code.
+
+## October 11, 2026 — storage scope clarification
+
+D20: Approved direction: provider-neutral upload engine; optional Garage Docker reference rather than a mandatory MinIO/LocalStack service. Consumer storage remains host-controlled. A filesystem adapter is included as the minimal reference path for traditional host-server uploads in the revised sprint.
+Implementation: not verified here. Provider tests: not verified here. Human review: pending.
+
+Copilot's reported local baseline remains incomplete against its own A01–A22 matrix. Only main was visible through the connector during this documentation update; local implementation code was not reviewed. The continuation prompt directs code/test reconciliation on the existing implementation branch.
+
+## October 11, 2026 — unreleased cleanup policy
+
+Approved clarification: no deployed customer files/records exist. Remove abandoned provider implementations and do not create legacy routing/transfer/compatibility code. Project-scoped disposable development resources may be reset. Consolidate unreleased prototype schemas while retaining functional migration infrastructure; avoid artificial upgrade tests. This does not relax product history/immutability requirements. Runtime cleanup and acceptance remain unverified here.

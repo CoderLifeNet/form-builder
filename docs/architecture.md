@@ -67,3 +67,7 @@ Reference integrity must protect definition/revision/file associations while all
 ## Still to design
 
 Safe regex mechanism; upload reference provider and scanning controls; migrations runner; authorization contract; errors/API schemas; query limits; encryption responsibilities; inherited binding behavior; exact condition semantics; dependency portability; old-version editing availability; licensing.
+
+## Upload storage clarification — October 11, 2026
+
+See [file storage](file-storage.md). The engine contract is provider-neutral. The revised reference paths include private local filesystem storage and an S3-compatible adapter tested with optional Garage. Form/record persistence does not require object storage when file fields are absent. This updates the earlier reference-provider proposal, not implementation/test status.

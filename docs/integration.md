@@ -58,3 +58,7 @@ Reference UI state labels now map to server lifecycle state instead of draft-row
 - published with unpublished changes
 - published with no unpublished changes
 - archived
+
+## File storage choices
+
+See [file storage](file-storage.md). Offer filesystem-only server uploads, optional Garage Docker setup, bring-your-own S3-compatible storage and custom-adapter examples. Object storage is not a requirement for all consumers. Publish actual tested provider/API compatibility and persistence/backup guidance.

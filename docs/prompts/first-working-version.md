@@ -40,7 +40,7 @@ Default to a TypeScript workspace with:
 - React renderer and reusable form manager/builder/record-history components, organized by responsibility.
 - Node.js service with a thin Express HTTP adapter.
 - Storage contracts and a PostgreSQL reference implementation. Default to explicit SQL migrations and a maintained PostgreSQL driver rather than adding an ORM solely for convenience. If current repository code already establishes a viable maintained alternative, retain it and explain the choice.
-- Upload storage contracts with a private filesystem baseline and optional S3-compatible integration. Provide an optional pinned Garage development setup for S3 testing; consumers do not need an object-storage server to use traditional uploads.
+- Provider-neutral upload storage contracts, a private local filesystem adapter, and an S3-compatible adapter. Provide optional Garage Docker Compose using a pinned official image and tested configuration. No-file forms need no storage provider; filesystem uploads require no object-storage service. See `docs/file-storage.md`.
 - A Vite/React reference host application using the real service and database.
 - Package artifacts and an external-consumer smoke fixture that install packed tarballs, not only workspace source aliases.
 
@@ -169,7 +169,7 @@ Records and published definitions are immutable through normal update APIs; auth
 
 Include explicit migration CLI/status, transactional behavior where supported, locking against competing runners, and a version ledger. Importing a package or starting the application must not silently migrate databases. Never rewrite an already-released migration. Seed development data separately and idempotently.
 
-Test a fresh database and a genuine sequential upgrade preserving definitions, revisions, IDs and file references. Do not manufacture meaningless schema churn merely to claim an upgrade test. Document supported starting schemas, backups, failure recovery, any nontransactional step, and rollback limitations.
+Test a fresh database and migration runner/ledger/locking/repeatability/failure behavior. Test a genuine upgrade preserving definitions, revisions, IDs and file references only where a meaningful retained earlier schema exists; this unreleased project does not need artificial prototype upgrade paths. Do not manufacture meaningless schema churn merely to claim an upgrade test. Document supported starting schemas, backups, failure recovery, any nontransactional step, and rollback limitations.
 
 Supply managed-record mode first, with optional host business-reference metadata. Document how to render/map host properties without promising automatic historical management of arbitrary host-owned business tables. Do not build uncoordinated dual writes to TrackForge tasks.
 
@@ -243,7 +243,7 @@ Private downloads must be authorized, with safe filenames/content disposition an
 
 Define pending-upload expiry and cleanup, canceled uploads, removed file references, old revisions, retention and permanent erasure. Failed submission keeps safely resumable completed uploads without creating orphaned permanent records. Upload retries and completion must be idempotent.
 
-Provide real S3-compatible local setup and tests. Credentials stay server-side. Documents state production storage/encryption/key-management responsibilities. No files can be default-prefilled through a browser file input.
+Provide filesystem-only setup and actual Garage-backed S3-compatible tests. Garage is an optional reference profile, not a core dependency. Credentials and private provider routing stay server-side. This unreleased build requires no legacy storage routing or transfer tools for abandoned providers; use the clean-slate rules in `docs/prompts/continue-first-working-version.md`. See `docs/file-storage.md`. Documents state production storage/encryption/key-management responsibilities. No files can be default-prefilled through a browser file input.
 
 ## 14. Duplicate, export, and import
 
@@ -325,7 +325,7 @@ Keep package versions coherent with VERSION/changelog. Choose a simple lockstep 
 
 ## 19. Required acceptance evidence
 
-Implement meaningful automated tests at appropriate layers and record exact commands/results. Use actual PostgreSQL and object storage for integration tests. Mocked unit tests supplement rather than replace these checks.
+Implement meaningful automated tests at appropriate layers and record exact commands/results. Use actual PostgreSQL, filesystem storage and Garage for the respective integration paths. Mocked unit tests supplement rather than replace these checks.
 
 | ID | Scenario that must pass |
 | --- | --- |
@@ -341,13 +341,13 @@ Implement meaningful automated tests at appropriate layers and record exact comm
 | A10 | Outsider/other-tenant forged requests cannot load, save, publish, export, resolve sources, read history, attach files or download objects. Authorized collaborators work according to host policy. |
 | A11 | Lost mutation responses and duplicate retries create one result; changed payload with same key fails; cached replay rechecks permissions. |
 | A12 | Conflicts, session expiry, revoked permissions, network failures and stale async source results preserve safe state and produce truthful recovery. |
-| A13 | Single/multiple uploads enforce content/size/count restrictions; completion/download authorization, retry/cancel, orphan cleanup and historical references work. |
+| A13 | Single/multiple uploads enforce content/size/count restrictions; completion/download authorization, retry/cancel, orphan cleanup and historical references work against private filesystem and actual Garage through the same contract. No-file forms require no provider; filesystem mode needs no object-store container. |
 | A14 | Duplicate/import allocate fresh identities, remap all internal references, preserve behavior and cannot change source forms. |
 | A15 | Replacement import preserves destination placement/old records, validates before replacing, and blocks publication until capability dependencies are deliberately reconciled. |
 | A16 | Export omits runtime records/secrets; malformed/oversized/unsupported/polluting imports and unsafe patterns are rejected. |
 | A17 | Compact capture cannot bypass requiredness/server validation; omitted field errors are actionable without exposing unauthorized fields. |
 | A18 | Archive/restore and authorized retention/erasure work, including file cleanup and failure recovery. |
-| A19 | Fresh install plus meaningful sequential schema upgrade preserve supported historical data and expose migration status/failure behavior. |
+| A19 | Fresh install and migration runner/ledger/locking/repeatability/failure checks pass. Exercise a genuine retained-schema upgrade where applicable; no artificial pre-release prototype upgrade path is required. Future released upgrades must preserve supported historical data. |
 | A20 | Packed-package external consumer fixture works without importing workspace source or server code into the browser. |
 | A21 | Automated accessibility checks and keyboard/focus/responsive manual developer checks run across builder, capture, dialogs/history at desktop and narrow widths. Human review remains pending until a human reviews. |
 | A22 | Minimal and workspace/project example guides are executed as written; documentation matches actual commands and APIs. |
@@ -374,3 +374,7 @@ The final conversational report should be concise and point to these files. Do n
 If an environment limitation prevents verification, distinguish implemented-but-unverified from tested work, give the exact blocker, and complete independent work. If runtime scope is incomplete, say so. Never substitute “ready for production” for evidence.
 
 Begin with repository inspection and the task plan, then proceed directly through execution.
+
+## Continuation clarification — unreleased clean slate
+
+The latest continuation prompt governs cleanup and pre-release migration applicability. Remove abandoned provider code/configuration, not legitimate generic S3 support. No customer data/provider compatibility preservation is needed for this initial development build. Historical correctness within the engine is still mandatory.
