@@ -1,7 +1,22 @@
 {
   "name": "@coderlifenet/form-react",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CoderLifeNet/form-builder.git",
+    "directory": "packages/form-react"
+  },
+  "bugs": {
+    "url": "https://github.com/CoderLifeNet/form-builder/issues"
+  },
+  "homepage": "https://github.com/CoderLifeNet/form-builder/tree/main/packages/form-react",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha",
+    "provenance": true
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -17,18 +32,23 @@
     "test": "vitest run --passWithNoTests"
   },
   "peerDependencies": {
-    "@coderlifenet/ui-core": "0.1.0-alpha.2",
-    "@coderlifenet/ui-components": "0.1.0-alpha.2",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "@coderlifenet/ui-core": "0.2.0-alpha.0",
+    "@coderlifenet/ui-components": "0.2.0-alpha.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   },
   "dependencies": {
-    "@coderlifenet/form-core": "0.1.0"
+    "@coderlifenet/form-core": "0.1.0-alpha.0"
   },
   "devDependencies": {
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
-  }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md"
+  ]
 }

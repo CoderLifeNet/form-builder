@@ -20,6 +20,26 @@ export type IdempotencyReplay = {
   response: unknown;
 };
 
+export type RecordSummary = {
+  recordId: string;
+  formId: string;
+  formName: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  currentRevisionId: string | null;
+  currentRevisionNumber: number | null;
+  currentDefinitionId: string | null;
+};
+
+export type RecordListFilters = {
+  formId?: string;
+  createdBy?: string;
+  createdFrom?: string;
+  createdTo?: string;
+  query?: string;
+};
+
 export class MigrationRunner {
   constructor(private readonly pool: Pool) {}
 
@@ -71,9 +91,13 @@ export class FormRepository {
     name: string;
     description: string | null;
     archived: boolean;
+    createdAt: string;
+    updatedAt: string;
     draftRevision: number | null;
     publishedVersion: number | null;
     publishedDefinitionId: string | null;
+    hasUnpublishedChanges: boolean;
+    lifecycleState: "unpublished_new" | "published_clean" | "published_with_unpublished_changes" | "archived";
   }>> {
     const includeArchived = options?.includeArchived ?? false;
     const result = await this.pool.query(
@@ -83,13 +107,19 @@ export class FormRepository {
         f.name,
         f.description,
         f.archived,
+        f.created_at,
+        f.updated_at,
         d.revision AS draft_revision,
         pd.publication_version AS published_version,
-        pd.id AS published_definition_id
+        pd.id AS published_definition_id,
+        CASE
+          WHEN pd.id IS NULL THEN true
+          ELSE (pd.definition_json - 'publicationVersion' - 'publishedAt') <> d.definition_json
+        END AS has_unpublished_changes
       FROM forms f
       LEFT JOIN form_drafts d ON d.form_id = f.id
       LEFT JOIN LATERAL (
-        SELECT id, publication_version
+        SELECT id, publication_version, definition_json
         FROM published_definitions p
         WHERE p.form_id = f.id
         ORDER BY publication_version DESC
@@ -107,9 +137,19 @@ export class FormRepository {
       name: row.name,
       description: row.description,
       archived: Boolean(row.archived),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
       draftRevision: row.draft_revision === null ? null : Number(row.draft_revision),
       publishedVersion: row.published_version === null ? null : Number(row.published_version),
-      publishedDefinitionId: row.published_definition_id
+      publishedDefinitionId: row.published_definition_id,
+      hasUnpublishedChanges: Boolean(row.has_unpublished_changes),
+      lifecycleState: row.archived
+        ? "archived"
+        : row.published_version === null
+          ? "unpublished_new"
+          : row.has_unpublished_changes
+            ? "published_with_unpublished_changes"
+            : "published_clean"
     }));
   }
 
@@ -118,9 +158,13 @@ export class FormRepository {
     name: string;
     description: string | null;
     archived: boolean;
+    createdAt: string;
+    updatedAt: string;
     draftRevision: number | null;
     publishedVersion: number | null;
     publishedDefinitionId: string | null;
+    hasUnpublishedChanges: boolean;
+    lifecycleState: "unpublished_new" | "published_clean" | "published_with_unpublished_changes" | "archived";
   } | null> {
     const result = await this.pool.query(
       `
@@ -129,13 +173,19 @@ export class FormRepository {
         f.name,
         f.description,
         f.archived,
+        f.created_at,
+        f.updated_at,
         d.revision AS draft_revision,
         pd.publication_version AS published_version,
-        pd.id AS published_definition_id
+        pd.id AS published_definition_id,
+        CASE
+          WHEN pd.id IS NULL THEN true
+          ELSE (pd.definition_json - 'publicationVersion' - 'publishedAt') <> d.definition_json
+        END AS has_unpublished_changes
       FROM forms f
       LEFT JOIN form_drafts d ON d.form_id = f.id
       LEFT JOIN LATERAL (
-        SELECT id, publication_version
+        SELECT id, publication_version, definition_json
         FROM published_definitions p
         WHERE p.form_id = f.id
         ORDER BY publication_version DESC
@@ -158,19 +208,29 @@ export class FormRepository {
       name: row.name,
       description: row.description,
       archived: Boolean(row.archived),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
       draftRevision: row.draft_revision === null ? null : Number(row.draft_revision),
       publishedVersion: row.published_version === null ? null : Number(row.published_version),
-      publishedDefinitionId: row.published_definition_id
+      publishedDefinitionId: row.published_definition_id,
+      hasUnpublishedChanges: Boolean(row.has_unpublished_changes),
+      lifecycleState: row.archived
+        ? "archived"
+        : row.published_version === null
+          ? "unpublished_new"
+          : row.has_unpublished_changes
+            ? "published_with_unpublished_changes"
+            : "published_clean"
     };
   }
 
-  async getPublishedDefinitionById(ctx: DbContext, definitionId: string): Promise<{
+  async getPublishedDefinitionById(ctx: DbContext, definitionId: string, transactionClient?: PoolClient): Promise<{
     id: string;
     formId: string;
     publicationVersion: number;
     definition: PublishedDefinition;
   } | null> {
-    const result = await this.pool.query(
+    const result = await (transactionClient ?? this.pool).query(
       `
       SELECT p.id, p.form_id, p.publication_version, p.definition_json
       FROM published_definitions p
@@ -212,6 +272,71 @@ export class FormRepository {
       LIMIT 1
     `,
       [formId, ctx.tenantId]
+    );
+
+    if (!result.rowCount) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      id: row.id,
+      formId: row.form_id,
+      publicationVersion: Number(row.publication_version),
+      definition: row.definition_json as PublishedDefinition
+    };
+  }
+
+  async listPublishedDefinitionsByForm(ctx: DbContext, formId: string): Promise<Array<{
+    id: string;
+    formId: string;
+    publicationVersion: number;
+    publishedAt: string;
+    fieldCount: number;
+    name: string;
+  }>> {
+    const result = await this.pool.query(
+      `
+      SELECT p.id, p.form_id, p.publication_version, p.definition_json
+      FROM published_definitions p
+      JOIN forms f ON f.id = p.form_id
+      WHERE p.form_id = $1
+        AND f.tenant_id = $2
+      ORDER BY p.publication_version DESC
+      `,
+      [formId, ctx.tenantId]
+    );
+
+    return result.rows.map((row) => {
+      const definition = row.definition_json as PublishedDefinition;
+      return {
+        id: row.id,
+        formId: row.form_id,
+        publicationVersion: Number(row.publication_version),
+        publishedAt: String(definition.publishedAt),
+        fieldCount: definition.fields.length,
+        name: definition.metadata.name
+      };
+    });
+  }
+
+  async getPublishedDefinitionByVersion(ctx: DbContext, formId: string, publicationVersion: number): Promise<{
+    id: string;
+    formId: string;
+    publicationVersion: number;
+    definition: PublishedDefinition;
+  } | null> {
+    const result = await this.pool.query(
+      `
+      SELECT p.id, p.form_id, p.publication_version, p.definition_json
+      FROM published_definitions p
+      JOIN forms f ON f.id = p.form_id
+      WHERE p.form_id = $1
+        AND p.publication_version = $2
+        AND f.tenant_id = $3
+      LIMIT 1
+      `,
+      [formId, publicationVersion, ctx.tenantId]
     );
 
     if (!result.rowCount) {
@@ -323,7 +448,7 @@ export class FormRepository {
 
       const draftRes = await client.query(
         `
-        SELECT d.definition_json, d.revision
+        SELECT d.definition_json, d.revision, f.archived
         FROM form_drafts d
         JOIN forms f ON f.id = d.form_id
         WHERE d.form_id = $1
@@ -336,8 +461,29 @@ export class FormRepository {
         throw new Error("FORM_NOT_FOUND");
       }
       const draft = draftRes.rows[0];
+      if (draft.archived) {
+        throw new Error("FORM_ARCHIVED");
+      }
       if (draft.revision !== expectedDraftRevision) {
         throw new Error("DRAFT_CONFLICT");
+      }
+
+      const latestPublished = await client.query(
+        `
+        SELECT definition_json
+        FROM published_definitions
+        WHERE form_id = $1
+        ORDER BY publication_version DESC
+        LIMIT 1
+      `,
+        [formId]
+      );
+      if (latestPublished.rowCount) {
+        const currentDraftHash = hashPayload(validateDefinition(draft.definition_json));
+        const latestPublishedHash = hashPayload(normalizePublishedDefinition(latestPublished.rows[0].definition_json));
+        if (currentDraftHash === latestPublishedHash) {
+          throw new Error("NO_UNPUBLISHED_CHANGES");
+        }
       }
 
       const versionRes = await client.query(
@@ -373,56 +519,130 @@ export class FormRepository {
     }
   }
 
+  async discardUnpublishedChanges(
+    ctx: DbContext,
+    formId: string,
+    expectedDraftRevision: number
+  ): Promise<{ revision: number }> {
+    const latest = await this.getLatestPublishedDefinitionByForm(ctx, formId);
+    if (!latest) {
+      throw new Error("NO_PUBLISHED_VERSION");
+    }
+
+    const normalized = normalizePublishedDefinition(latest.definition);
+    return this.saveDraft(ctx, formId, expectedDraftRevision, normalized);
+  }
+
+  async deleteDraftOnlyForm(
+    ctx: DbContext,
+    formId: string,
+    expectedDraftRevision: number
+  ): Promise<void> {
+    const result = await this.pool.query(
+      `
+      DELETE FROM forms f
+      USING form_drafts d
+      WHERE f.id = d.form_id
+        AND f.id = $1
+        AND f.tenant_id = $2
+        AND d.revision = $3
+        AND NOT EXISTS (
+          SELECT 1
+          FROM published_definitions p
+          WHERE p.form_id = f.id
+        )
+      RETURNING f.id
+    `,
+      [formId, ctx.tenantId, expectedDraftRevision]
+    );
+
+    if (!result.rowCount) {
+      throw new Error("DRAFT_CONFLICT");
+    }
+  }
+
+  async renameForm(
+    ctx: DbContext,
+    formId: string,
+    name: string
+  ): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      throw new Error("FORM_NAME_REQUIRED");
+    }
+
+    const result = await this.pool.query(
+      `
+      UPDATE forms f
+      SET name = $3,
+          updated_at = NOW()
+      WHERE f.tenant_id = $1
+        AND f.id = $2
+        AND NOT EXISTS (
+          SELECT 1
+          FROM forms other
+          WHERE other.tenant_id = $1
+            AND other.name = $3
+            AND other.id <> $2
+        )
+      RETURNING f.id
+      `,
+      [ctx.tenantId, formId, trimmed]
+    );
+
+    if (result.rowCount) {
+      return;
+    }
+
+    const form = await this.pool.query(
+      `
+      SELECT id
+      FROM forms
+      WHERE tenant_id = $1
+        AND id = $2
+      LIMIT 1
+      `,
+      [ctx.tenantId, formId]
+    );
+
+    if (!form.rowCount) {
+      throw new Error("FORM_NOT_FOUND");
+    }
+
+    throw new Error("FORM_NAME_CONFLICT");
+  }
+
   async withIdempotency(
     ctx: DbContext,
     operation: string,
     idempotencyKey: string,
     payload: unknown,
-    handler: () => Promise<{ statusCode: number; response: unknown }>
+    handler: (client: PoolClient) => Promise<{ statusCode: number; response: unknown }>
   ): Promise<IdempotencyReplay> {
     const requestHash = hashPayload(payload);
-    const existing = await this.pool.query(
-      `
-      SELECT request_hash, status_code, response_json
-      FROM idempotency_keys
-      WHERE tenant_id = $1
-        AND operation = $2
-        AND key_value = $3
-        AND expires_at > NOW()
-    `,
-      [ctx.tenantId, operation, idempotencyKey]
-    );
-
-    if (existing.rowCount && existing.rowCount > 0) {
-      const row = existing.rows[0];
-      if (row.request_hash !== requestHash) {
-        throw new Error("IDEMPOTENCY_PAYLOAD_MISMATCH");
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      // Serialize identical keys across processes, and commit mutation + replay together.
+      await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [JSON.stringify([ctx.tenantId, operation, idempotencyKey])]);
+      await client.query("DELETE FROM idempotency_keys WHERE tenant_id=$1 AND operation=$2 AND key_value=$3 AND expires_at <= NOW()", [ctx.tenantId, operation, idempotencyKey]);
+      const existing = await client.query("SELECT request_hash, status_code, response_json, created_by FROM idempotency_keys WHERE tenant_id=$1 AND operation=$2 AND key_value=$3", [ctx.tenantId, operation, idempotencyKey]);
+      if (existing.rowCount) {
+        const row = existing.rows[0];
+        if (row.created_by !== ctx.actorId) throw new Error("FORBIDDEN");
+        if (row.request_hash !== requestHash) throw new Error("IDEMPOTENCY_PAYLOAD_MISMATCH");
+        await client.query("COMMIT");
+        return { statusCode: row.status_code, response: row.response_json };
       }
-      return { statusCode: row.status_code, response: row.response_json };
-    }
-
-    const outcome = await handler();
-
-    await this.pool.query(
-      `
-      INSERT INTO idempotency_keys (id, tenant_id, operation, key_value, request_hash, response_json, status_code, created_by, expires_at)
-      VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, NOW() + INTERVAL '24 hours')
-      ON CONFLICT (tenant_id, operation, key_value)
-      DO NOTHING
-    `,
-      [
-        createStableId("idem"),
-        ctx.tenantId,
-        operation,
-        idempotencyKey,
-        requestHash,
-        JSON.stringify(outcome.response),
-        outcome.statusCode,
-        ctx.actorId
-      ]
-    );
-
-    return outcome;
+      const outcome = await handler(client);
+      await client.query(`INSERT INTO idempotency_keys (id,tenant_id,operation,key_value,request_hash,response_json,status_code,created_by,expires_at)
+        VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8,NOW()+INTERVAL '24 hours')`, [createStableId("idem"),ctx.tenantId,operation,idempotencyKey,requestHash,JSON.stringify(outcome.response),outcome.statusCode,ctx.actorId]);
+      await client.query("COMMIT");
+      return outcome;
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally { client.release(); }
   }
 
   async createRecordRevision(input: {
@@ -433,10 +653,16 @@ export class FormRepository {
     values: Record<string, unknown>;
     selectedLabels: Record<string, string>;
     uploadIds?: string[];
+    expectedRevision?: number;
+    transactionClient?: PoolClient;
+    explicitMigration?: boolean;
   }): Promise<{ recordId: string; revisionId: string; revisionNumber: number }> {
-    const client = await this.pool.connect();
+    const ownTransaction = !input.transactionClient;
+    const client = input.transactionClient ?? await this.pool.connect();
     try {
-      await client.query("BEGIN");
+      if (ownTransaction) await client.query("BEGIN");
+      const publication = await client.query("SELECT p.form_id FROM published_definitions p JOIN forms f ON f.id=p.form_id WHERE p.id=$1 AND f.tenant_id=$2", [input.definitionId,input.ctx.tenantId]);
+      if (!publication.rowCount || publication.rows[0].form_id !== input.formId) throw new Error("DEFINITION_NOT_FOUND");
       const recordId = input.recordId ?? createStableId("record");
 
       let revisionNumber = 1;
@@ -451,7 +677,7 @@ export class FormRepository {
       } else {
         const lock = await client.query(
           `
-          SELECT id
+          SELECT id, form_id
           FROM records
           WHERE id = $1 AND tenant_id = $2
           FOR UPDATE
@@ -462,6 +688,10 @@ export class FormRepository {
           throw new Error("RECORD_NOT_FOUND");
         }
 
+        if (lock.rows[0].form_id !== input.formId) throw new Error("RECORD_FORM_CONFLICT");
+        const latestDefinition = await client.query("SELECT definition_id FROM record_revisions WHERE record_id=$1 ORDER BY revision_number DESC LIMIT 1", [recordId]);
+        if (!input.explicitMigration && latestDefinition.rows[0]?.definition_id !== input.definitionId) throw new Error("RECORD_DEFINITION_CONFLICT");
+
         const latest = await client.query(
           `
           SELECT COALESCE(MAX(revision_number), 0) AS max_revision
@@ -470,7 +700,11 @@ export class FormRepository {
         `,
           [recordId]
         );
-        revisionNumber = Number(latest.rows[0].max_revision) + 1;
+        const currentRevisionNumber = Number(latest.rows[0].max_revision);
+        if (input.expectedRevision !== undefined && currentRevisionNumber !== input.expectedRevision) {
+          throw new Error("RECORD_CONFLICT");
+        }
+        revisionNumber = currentRevisionNumber + 1;
       }
 
       const revisionId = createStableId("revision");
@@ -502,22 +736,63 @@ export class FormRepository {
       );
 
       if (input.uploadIds && input.uploadIds.length > 0) {
-        const attach = await client.query(
+        const uploads = await client.query(
           `
-          UPDATE uploads
-          SET status = 'attached',
-              attached_revision_id = $1,
-              updated_at = NOW()
-          WHERE id = ANY($2::text[])
-            AND tenant_id = $3
-            AND status = 'completed'
-          RETURNING id
-        `,
-          [revisionId, input.uploadIds, input.ctx.tenantId]
+          SELECT u.id, u.status, u.attached_revision_id,
+                 rr.record_id AS attached_record_id
+          FROM uploads u
+          LEFT JOIN record_revisions rr ON rr.id = u.attached_revision_id
+          WHERE u.id = ANY($1::text[])
+            AND u.tenant_id = $2
+            AND u.form_id = $3
+          `,
+          [input.uploadIds, input.ctx.tenantId, input.formId]
         );
 
-        if (attach.rowCount !== input.uploadIds.length) {
+        const uploadById = new Map<string, { status: string; attachedRevisionId: string | null; attachedRecordId: string | null }>();
+        for (const row of uploads.rows) {
+          uploadById.set(String(row.id), {
+            status: String(row.status),
+            attachedRevisionId: row.attached_revision_id ? String(row.attached_revision_id) : null,
+            attachedRecordId: row.attached_record_id ? String(row.attached_record_id) : null
+          });
+        }
+
+        const toAttach: string[] = [];
+        for (const uploadId of input.uploadIds) {
+          const found = uploadById.get(uploadId);
+          if (!found) {
+            throw new Error("UPLOAD_ATTACH_CONFLICT");
+          }
+          if (found.status === "completed" && !found.attachedRevisionId) {
+            toAttach.push(uploadId);
+            continue;
+          }
+          if (found.attachedRevisionId && found.attachedRecordId === recordId) {
+            continue;
+          }
           throw new Error("UPLOAD_ATTACH_CONFLICT");
+        }
+
+        if (toAttach.length > 0) {
+          const attach = await client.query(
+            `
+            UPDATE uploads
+            SET status = 'attached',
+                attached_revision_id = $1,
+                updated_at = NOW()
+            WHERE id = ANY($2::text[])
+              AND tenant_id = $3
+              AND status = 'completed'
+              AND form_id = $4
+            RETURNING id
+            `,
+            [revisionId, toAttach, input.ctx.tenantId, input.formId]
+          );
+
+          if (attach.rowCount !== toAttach.length) {
+            throw new Error("UPLOAD_ATTACH_CONFLICT");
+          }
         }
       }
 
@@ -526,13 +801,13 @@ export class FormRepository {
         revisionNumber
       });
 
-      await client.query("COMMIT");
+      if (ownTransaction) await client.query("COMMIT");
       return { recordId, revisionId, revisionNumber };
     } catch (error) {
-      await client.query("ROLLBACK");
+      if (ownTransaction) await client.query("ROLLBACK");
       throw error;
     } finally {
-      client.release();
+      if (ownTransaction) client.release();
     }
   }
 
@@ -589,7 +864,7 @@ export class FormRepository {
         input.ctx.tenantId,
         input.ctx.actorId,
         uploadId,
-        JSON.stringify({ formId: input.formId, fileName: input.fileName, sizeBytes: input.sizeBytes })
+        JSON.stringify({ formId: input.formId, sizeBytes: input.sizeBytes })
       ]
     );
 
@@ -605,14 +880,27 @@ export class FormRepository {
     contentType: string;
     sizeBytes: number;
     status: string;
+    createdBy: string;
     attachedRevisionId: string | null;
+    attachedRecordId: string | null;
   } | null> {
     const result = await this.pool.query(
       `
-      SELECT id, tenant_id, form_id, object_key, file_name, content_type, size_bytes, status, attached_revision_id
-      FROM uploads
-      WHERE id = $1
-        AND tenant_id = $2
+      SELECT u.id,
+             u.tenant_id,
+             u.form_id,
+             u.object_key,
+             u.file_name,
+             u.content_type,
+             u.size_bytes,
+             u.status,
+             u.created_by,
+             u.attached_revision_id,
+             rr.record_id AS attached_record_id
+      FROM uploads u
+      LEFT JOIN record_revisions rr ON rr.id = u.attached_revision_id
+      WHERE u.id = $1
+        AND u.tenant_id = $2
     `,
       [uploadId, ctx.tenantId]
     );
@@ -631,7 +919,9 @@ export class FormRepository {
       contentType: row.content_type,
       sizeBytes: Number(row.size_bytes),
       status: row.status,
-      attachedRevisionId: row.attached_revision_id
+      createdBy: String(row.created_by),
+      attachedRevisionId: row.attached_revision_id,
+      attachedRecordId: row.attached_record_id ? String(row.attached_record_id) : null
     };
   }
 
@@ -663,16 +953,84 @@ export class FormRepository {
     );
   }
 
+  async saveBinding(ctx: DbContext, scope: { type: string; id: string }, input: { formId: string; mode: "latest" | "pinned"; definitionId?: string; expectedRevision: number }): Promise<{ revision: number }> {
+    const definition = input.mode === "pinned"
+      ? await this.getPublishedDefinitionById(ctx, input.definitionId ?? "")
+      : (await this.pool.query(`SELECT pd.id, pd.form_id AS "formId" FROM published_definitions pd JOIN forms f ON f.id = pd.form_id WHERE f.tenant_id = $1 AND f.id = $2 ORDER BY pd.publication_version DESC LIMIT 1`, [ctx.tenantId, input.formId])).rows[0];
+    if (!definition || definition.formId !== input.formId) throw new Error("DEFINITION_NOT_FOUND");
+    const parameters = [ctx.tenantId, scope.type, scope.id, input.formId, JSON.stringify({ mode: input.mode }), definition.id, ctx.actorId];
+    const result = input.expectedRevision === 0
+      ? await this.pool.query(`INSERT INTO form_bindings (id,tenant_id,scope_type,scope_id,form_id,policy_json,resolved_definition_id,updated_by) VALUES ($8,$1,$2,$3,$4,$5::jsonb,$6,$7) ON CONFLICT (tenant_id,scope_type,scope_id) DO NOTHING RETURNING revision`, [...parameters, createStableId("binding")])
+      : await this.pool.query(`UPDATE form_bindings SET form_id=$4,policy_json=$5::jsonb,resolved_definition_id=$6,updated_by=$7,updated_at=NOW(),revision=revision+1 WHERE tenant_id=$1 AND scope_type=$2 AND scope_id=$3 AND revision=$8 RETURNING revision`, [...parameters, input.expectedRevision]);
+    if (!result.rowCount) throw new Error("BINDING_CONFLICT");
+    return { revision: Number(result.rows[0].revision) };
+  }
+  async resetBinding(ctx: DbContext, scope: { type: string; id: string }, expectedRevision: number): Promise<void> {
+    const result = await this.pool.query("DELETE FROM form_bindings WHERE tenant_id=$1 AND scope_type=$2 AND scope_id=$3 AND revision=$4 RETURNING id", [ctx.tenantId,scope.type,scope.id,expectedRevision]);
+    if (!result.rowCount) throw new Error("BINDING_CONFLICT");
+  }
+  async resolveBinding(ctx: DbContext, ancestors: Array<{ type: string; id: string }>): Promise<{ source: {type:string;id:string}; revision: number; mode: "latest" | "pinned"; definitionId: string; formId: string } | null> {
+    for (const scope of [...ancestors].reverse()) {
+      const result = await this.pool.query("SELECT revision,policy_json,resolved_definition_id,form_id FROM form_bindings WHERE tenant_id=$1 AND scope_type=$2 AND scope_id=$3", [ctx.tenantId,scope.type,scope.id]);
+      const binding = result.rows[0];
+      if (!binding) continue;
+      const mode = binding.policy_json.mode as "latest" | "pinned";
+      let definitionId = String(binding.resolved_definition_id);
+      if (mode === "latest") {
+        const latest = await this.pool.query("SELECT id FROM published_definitions WHERE form_id=$1 ORDER BY publication_version DESC LIMIT 1", [binding.form_id]);
+        definitionId = latest.rows[0]?.id ?? definitionId;
+      }
+      return { source:scope, revision:Number(binding.revision), mode, definitionId, formId:String(binding.form_id) };
+    }
+    return null;
+  }
+
+  async listStorageDeletions(ctx: DbContext): Promise<string[]> {
+    const rows = await this.pool.query("SELECT object_key FROM storage_deletions WHERE tenant_id = $1 ORDER BY created_at LIMIT 100", [ctx.tenantId]);
+    return rows.rows.map(row => String(row.object_key));
+  }
+  async acknowledgeStorageDeletion(ctx: DbContext, objectKey: string): Promise<void> {
+    await this.pool.query("DELETE FROM storage_deletions WHERE tenant_id = $1 AND object_key = $2", [ctx.tenantId, objectKey]);
+  }
+  async listExpiredUploads(ctx: DbContext, maxAgeMs: number): Promise<Array<{ id: string; objectKey: string }>> {
+    const rows = await this.pool.query(`SELECT id, object_key FROM uploads WHERE tenant_id = $1 AND attached_revision_id IS NULL
+      AND (status = 'deletion_pending' OR created_at < NOW() - ($2 * INTERVAL '1 millisecond')) ORDER BY created_at LIMIT 100`, [ctx.tenantId, maxAgeMs]);
+    return rows.rows.map(row => ({ id: String(row.id), objectKey: String(row.object_key) }));
+  }
+
+  async listRetentionEligibleRecords(
+    ctx: DbContext,
+    maxAgeMs: number,
+    mode: "archived_forms_only" | "all_forms"
+  ): Promise<string[]> {
+    const rows = await this.pool.query(
+      `
+      SELECT r.id
+      FROM records r
+      JOIN forms f ON f.id = r.form_id AND f.tenant_id = r.tenant_id
+      WHERE r.tenant_id = $1
+        AND r.created_at < NOW() - ($2 * INTERVAL '1 millisecond')
+        AND ($3::text = 'all_forms' OR f.archived = true)
+      ORDER BY r.created_at ASC, r.id ASC
+      LIMIT 100
+      `,
+      [ctx.tenantId, maxAgeMs, mode]
+    );
+
+    return rows.rows.map((row) => String(row.id));
+  }
+
   async listRecordRevisions(ctx: DbContext, recordId: string): Promise<Array<{
     id: string;
     revisionNumber: number;
     definitionId: string;
     values: Record<string, unknown>;
+    selectedLabels: Record<string, string>;
     createdAt: string;
   }>> {
     const result = await this.pool.query(
       `
-      SELECT rr.id, rr.revision_number, rr.definition_id, rr.values_json, rr.created_at
+      SELECT rr.id, rr.revision_number, rr.definition_id, rr.values_json, rr.selected_labels_json, rr.created_at
       FROM record_revisions rr
       JOIN records r ON r.id = rr.record_id
       WHERE rr.record_id = $1
@@ -687,7 +1045,102 @@ export class FormRepository {
       revisionNumber: Number(row.revision_number),
       definitionId: row.definition_id,
       values: row.values_json as Record<string, unknown>,
+      selectedLabels: row.selected_labels_json as Record<string, string>,
       createdAt: row.created_at.toISOString()
+    }));
+  }
+
+  async getRecordSummaryById(ctx: DbContext, recordId: string): Promise<RecordSummary | null> {
+    const result = await this.pool.query(
+      `
+      SELECT r.id,
+             r.form_id,
+             f.name AS form_name,
+             r.created_by,
+             r.created_at,
+              COALESCE(rr.created_at, r.created_at) AS updated_at,
+             r.current_revision_id,
+             rr.revision_number AS current_revision_number,
+             rr.definition_id AS current_definition_id
+      FROM records r
+      JOIN forms f ON f.id = r.form_id AND f.tenant_id = r.tenant_id
+      LEFT JOIN record_revisions rr ON rr.id = r.current_revision_id
+      WHERE r.id = $1
+        AND r.tenant_id = $2
+      LIMIT 1
+      `,
+      [recordId, ctx.tenantId]
+    );
+
+    if (!result.rowCount) {
+      return null;
+    }
+
+    const row = result.rows[0];
+    return {
+      recordId: String(row.id),
+      formId: String(row.form_id),
+      formName: String(row.form_name),
+      createdBy: String(row.created_by),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+      currentRevisionId: row.current_revision_id ? String(row.current_revision_id) : null,
+      currentRevisionNumber: row.current_revision_number === null ? null : Number(row.current_revision_number),
+      currentDefinitionId: row.current_definition_id ? String(row.current_definition_id) : null
+    };
+  }
+
+  async listRecordSummaries(
+    ctx: DbContext,
+    options: { offset: number; limit: number; filters?: RecordListFilters }
+  ): Promise<RecordSummary[]> {
+    const filters = options.filters ?? {};
+    const result = await this.pool.query(
+      `
+      SELECT r.id,
+             r.form_id,
+             f.name AS form_name,
+             r.created_by,
+             r.created_at,
+              COALESCE(rr.created_at, r.created_at) AS updated_at,
+             r.current_revision_id,
+             rr.revision_number AS current_revision_number,
+             rr.definition_id AS current_definition_id
+      FROM records r
+      JOIN forms f ON f.id = r.form_id AND f.tenant_id = r.tenant_id
+      LEFT JOIN record_revisions rr ON rr.id = r.current_revision_id
+      WHERE r.tenant_id = $1
+        AND ($2::text IS NULL OR r.form_id = $2)
+        AND ($3::text IS NULL OR r.created_by = $3)
+        AND ($4::timestamptz IS NULL OR r.created_at >= $4::timestamptz)
+        AND ($5::timestamptz IS NULL OR r.created_at <= $5::timestamptz)
+        AND ($6::text IS NULL OR r.id ILIKE ('%' || $6 || '%') OR f.name ILIKE ('%' || $6 || '%'))
+      ORDER BY r.created_at DESC, r.id DESC
+      OFFSET $7
+      LIMIT $8
+      `,
+      [
+        ctx.tenantId,
+        filters.formId ?? null,
+        filters.createdBy ?? null,
+        filters.createdFrom ?? null,
+        filters.createdTo ?? null,
+        filters.query ?? null,
+        options.offset,
+        options.limit
+      ]
+    );
+
+    return result.rows.map((row) => ({
+      recordId: String(row.id),
+      formId: String(row.form_id),
+      formName: String(row.form_name),
+      createdBy: String(row.created_by),
+      createdAt: row.created_at.toISOString(),
+      updatedAt: row.updated_at.toISOString(),
+      currentRevisionId: row.current_revision_id ? String(row.current_revision_id) : null,
+      currentRevisionNumber: row.current_revision_number === null ? null : Number(row.current_revision_number),
+      currentDefinitionId: row.current_definition_id ? String(row.current_definition_id) : null
     }));
   }
 
@@ -740,6 +1193,10 @@ export class FormRepository {
         [recordId, ctx.tenantId]
       );
 
+      for (const upload of uploads.rows) {
+        await client.query("INSERT INTO storage_deletions (tenant_id, object_key) VALUES ($1, $2) ON CONFLICT DO NOTHING", [ctx.tenantId, upload.object_key]);
+      }
+
       await client.query(
         `
         DELETE FROM uploads u
@@ -785,4 +1242,11 @@ export function makePool(connectionString = process.env.FORM_DB_URL): Pool {
 function hashPayload(payload: unknown): string {
   const raw = JSON.stringify(payload);
   return createHash("sha256").update(raw).digest("hex");
+}
+
+function normalizePublishedDefinition(definition: unknown): FormDefinition {
+  const cloned = JSON.parse(JSON.stringify(definition)) as Record<string, unknown>;
+  delete cloned.publicationVersion;
+  delete cloned.publishedAt;
+  return validateDefinition(cloned);
 }

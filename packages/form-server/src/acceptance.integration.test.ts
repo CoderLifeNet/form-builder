@@ -10,7 +10,7 @@ type TestIdentity = {
   tenantId: string;
 };
 
-const dbUrl = process.env.FORM_DB_URL;
+const dbUrl = process.env.FORM_RUN_DB_TESTS === "true" ? process.env.FORM_TEST_DB_URL : undefined;
 const integration = dbUrl ? describe : describe.skip;
 
 const allCapabilities = [
@@ -29,8 +29,13 @@ const allCapabilities = [
 const identityCapabilities = new Map<string, string[]>([
   ["tenant_alpha:owner1", allCapabilities],
   ["tenant_alpha:collab1", ["forms.submit", "forms.read", "forms.edit", "forms.history", "forms.upload"]],
+  ["tenant_alpha:viewer1", ["forms.read", "forms.history"]],
   ["tenant_beta:owner2", allCapabilities]
 ]);
+
+const viewerAllowedForms = new Set<string>();
+const viewerAllowedRecords = new Set<string>();
+const viewerAllowedUploads = new Set<string>();
 
 function makePolicyAdapter(): PolicyAdapter {
   return {
@@ -43,8 +48,57 @@ function makePolicyAdapter(): PolicyAdapter {
     },
     async authorize(ctx, capability) {
       const capabilities = identityCapabilities.get(`${ctx.tenantId}:${ctx.actorId}`) ?? [];
+      const baseAllowed = capabilities.includes(capability);
+      if (!baseAllowed) {
+        return {
+          allowed: false,
+          capabilities
+        };
+      }
+
       return {
-        allowed: capabilities.includes(capability),
+        allowed: true,
+        capabilities
+      };
+    }
+  };
+}
+
+function makeResourceAwarePolicyAdapter(): PolicyAdapter {
+  return {
+    async resolveContext(req): Promise<AuthContext> {
+      return {
+        tenantId: (req.header("x-tenant-id") ?? "tenant_alpha").trim(),
+        actorId: (req.header("x-actor-id") ?? "owner1").trim(),
+        isAnonymous: false
+      };
+    },
+    async authorize(ctx, capability, resource) {
+      const capabilities = identityCapabilities.get(`${ctx.tenantId}:${ctx.actorId}`) ?? [];
+      const baseAllowed = capabilities.includes(capability);
+      if (!baseAllowed) {
+        return { allowed: false, capabilities };
+      }
+
+      if (ctx.actorId === "viewer1") {
+        if (resource?.uploadId) {
+          if (!viewerAllowedUploads.has(resource.uploadId)) {
+            return { allowed: false, capabilities };
+          }
+        }
+        if (resource?.recordId) {
+          if (!viewerAllowedRecords.has(resource.recordId)) {
+            return { allowed: false, capabilities };
+          }
+        } else if (resource?.createdBy && resource.createdBy !== "owner1") {
+          return { allowed: false, capabilities };
+        } else if (resource?.formId && !viewerAllowedForms.has(resource.formId)) {
+          return { allowed: false, capabilities };
+        }
+      }
+
+      return {
+        allowed: true,
         capabilities
       };
     }
@@ -80,6 +134,12 @@ function createBaseDefinition(name: string): FormDefinition {
   };
 }
 
+let idempotencyCounter = 0;
+function nextIdempotencyKey(): string {
+  idempotencyCounter += 1;
+  return `idem_${Date.now()}_${idempotencyCounter}`;
+}
+
 integration("form server acceptance integration", () => {
   let pool: ReturnType<typeof makePool>;
   let repo: FormRepository;
@@ -93,8 +153,9 @@ integration("form server acceptance integration", () => {
 
     app = createFormServer({
       repository: repo,
-      policyAdapter: makePolicyAdapter(),
+      policyAdapter: makeResourceAwarePolicyAdapter(),
       sourceRegistry: {
+        async capabilities() { return { "profile.first_name": "1" }; },
         async resolveSourceValue(sourceId) {
           if (sourceId === "profile.first_name") {
             return "Owner";
@@ -155,7 +216,7 @@ integration("form server acceptance integration", () => {
     const firstSubmit = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId,
           definitionId: definitionV1Id,
@@ -237,6 +298,7 @@ integration("form server acceptance integration", () => {
           formId,
           definitionId: definitionV1Id,
           recordId,
+          expectedRevision: 1,
           values: { field_title: "second revision still v1" }
         }),
       owner
@@ -316,7 +378,7 @@ integration("form server acceptance integration", () => {
     const missingTitle = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publish.body.definitionId,
@@ -336,7 +398,7 @@ integration("form server acceptance integration", () => {
     const success = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publish.body.definitionId,
@@ -351,6 +413,82 @@ integration("form server acceptance integration", () => {
     expect(history.status).toBe(200);
     expect(history.body[0].values.field_first_name).toBe("Owner");
     expect(history.body[0].values.field_title).toBe("filled");
+  });
+
+  it("renames forms with persistence and enforces validation, conflicts, and authorization", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+    const collaborator = { actorId: "collab1", tenantId: "tenant_alpha" };
+
+    const createdA = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Rename source ${Date.now()}`,
+        definition: createBaseDefinition("Rename source")
+      }),
+      owner
+    );
+    expect(createdA.status).toBe(201);
+
+    const conflictName = `Rename conflict ${Date.now()}`;
+    const createdB = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: conflictName,
+        definition: createBaseDefinition("Rename conflict")
+      }),
+      owner
+    );
+    expect(createdB.status).toBe(201);
+
+    const renamedName = `Renamed form ${Date.now()}`;
+    const renameSuccess = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: renamedName }),
+      owner
+    );
+    expect(renameSuccess.status).toBe(200);
+    expect(renameSuccess.body.name).toBe(renamedName);
+
+    const reloadedById = await withIdentity(
+      request(app).get(`/api/forms/${createdA.body.formId}`),
+      owner
+    );
+    expect(reloadedById.status).toBe(200);
+    expect(reloadedById.body.name).toBe(renamedName);
+
+    const reloadedList = await withIdentity(
+      request(app).get("/api/forms?includeArchived=true"),
+      owner
+    );
+    expect(reloadedList.status).toBe(200);
+    const listedRenamed = reloadedList.body.find((form: { id: string; name: string }) => form.id === createdA.body.formId);
+    expect(listedRenamed?.name).toBe(renamedName);
+
+    const whitespace = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: "   " }),
+      owner
+    );
+    expect(whitespace.status).toBe(400);
+    expect(whitespace.body.code).toBe("BAD_REQUEST");
+    expect(whitespace.body.message).toBe("Enter a form name.");
+
+    const conflict = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: conflictName }),
+      owner
+    );
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.code).toBe("FORM_NAME_CONFLICT");
+
+    const unauthorized = await withIdentity(
+      request(app).patch(`/api/forms/${createdA.body.formId}`).send({ name: "Attempt by collaborator" }),
+      collaborator
+    );
+    expect(unauthorized.status).toBe(403);
+    expect(unauthorized.body.code).toBe("FORBIDDEN");
+
+    const unchanged = await withIdentity(
+      request(app).get(`/api/forms/${createdA.body.formId}`),
+      owner
+    );
+    expect(unchanged.status).toBe(200);
+    expect(unchanged.body.name).toBe(renamedName);
   });
 
   it("supports single and multi-upload submission and prevents cross-tenant access", async () => {
@@ -429,7 +567,7 @@ integration("form server acceptance integration", () => {
     const saved = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publish.body.definitionId,
@@ -466,8 +604,8 @@ integration("form server acceptance integration", () => {
     expect(outsiderExport.status).toBe(404);
 
     const outsiderHistory = await withIdentity(request(app).get(`/api/records/${saved.body.recordId}/history`), outsider);
-    expect(outsiderHistory.status).toBe(200);
-    expect(outsiderHistory.body).toEqual([]);
+    expect(outsiderHistory.status).toBe(404);
+    expect(outsiderHistory.body.code).toBe("RECORD_NOT_FOUND");
 
     const outsiderDownload = await withIdentity(request(app).get(`/api/uploads/${up1.body.uploadId}/download`), outsider);
     expect(outsiderDownload.status).toBe(404);
@@ -599,7 +737,7 @@ integration("form server acceptance integration", () => {
     const saved = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: publishV1.body.definitionId,
@@ -706,7 +844,7 @@ integration("form server acceptance integration", () => {
     const submitted = await withIdentity(
       request(app)
         .post("/api/records")
-        .set("idempotency-key", createStableId("idem"))
+        .set("idempotency-key", nextIdempotencyKey())
         .send({
           formId: created.body.formId,
           definitionId: published.body.definitionId,
@@ -722,5 +860,464 @@ integration("form server acceptance integration", () => {
         expect.objectContaining({ fieldId: "field_regex", code: "REGEX_UNSAFE" })
       ])
     );
+  });
+
+  it("supports record discovery/version discovery with resource authorization and safe edit/attachment lifecycle", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+    const collab = { actorId: "collab1", tenantId: "tenant_alpha" };
+    const viewer = { actorId: "viewer1", tenantId: "tenant_alpha" };
+    const outsider = { actorId: "owner2", tenantId: "tenant_beta" };
+
+    viewerAllowedForms.clear();
+    viewerAllowedRecords.clear();
+    viewerAllowedUploads.clear();
+
+    const definitionV1: FormDefinition = {
+      metadata: {
+        formId: createStableId("meta"),
+        name: "Discovery form",
+        schemaVersion: "1.0.0"
+      },
+      sections: [{ id: "s", title: "Main", order: 0 }],
+      fields: [
+        {
+          id: "field_title",
+          key: "field_title",
+          type: "text",
+          label: "Title",
+          required: true,
+          sectionId: "s",
+          row: 0,
+          width: 12,
+          rules: []
+        },
+        {
+          id: "field_attachment",
+          key: "field_attachment",
+          type: "single_file",
+          label: "Attachment",
+          required: false,
+          sectionId: "s",
+          row: 1,
+          width: 12,
+          rules: []
+        }
+      ],
+      dependencyVersions: {}
+    };
+
+    const created = await withIdentity(request(app).post("/api/forms").send({ name: `Discovery ${Date.now()}`, definition: definitionV1 }), owner);
+    expect(created.status).toBe(201);
+    const formId = created.body.formId as string;
+
+    viewerAllowedForms.add(formId);
+
+    const publishV1 = await withIdentity(
+      request(app).post(`/api/forms/${formId}/publish`).send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(publishV1.status).toBe(201);
+
+    const uploaded = await withIdentity(
+      request(app)
+        .post(`/api/forms/${formId}/uploads`)
+        .set("content-type", "application/octet-stream")
+        .set("x-file-name", "evidence.pdf")
+        .set("x-file-content-type", "application/pdf")
+        .send(Buffer.from("%PDF-1.7\n1 0 obj\n<<>>\nendobj\n")),
+      owner
+    );
+    expect(uploaded.status).toBe(201);
+
+    const uploadedCollab = await withIdentity(
+      request(app)
+        .post(`/api/forms/${formId}/uploads`)
+        .set("content-type", "application/octet-stream")
+        .set("x-file-name", "collab-evidence.pdf")
+        .set("x-file-content-type", "application/pdf")
+        .send(Buffer.from("%PDF-1.7\n2 0 obj\n<<>>\nendobj\n")),
+      collab
+    );
+    expect(uploadedCollab.status).toBe(201);
+
+    const ownerSubmission = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", createStableId("idem"))
+        .send({
+          formId,
+          definitionId: publishV1.body.definitionId,
+          values: { field_title: "owner submission", field_attachment: uploaded.body.uploadId },
+          uploadIds: [uploaded.body.uploadId]
+        }),
+      owner
+    );
+    expect(ownerSubmission.status).toBe(201);
+    const recordId = ownerSubmission.body.recordId as string;
+    viewerAllowedUploads.add(uploaded.body.uploadId as string);
+
+    const draft = await withIdentity(request(app).get(`/api/forms/${formId}/draft`), owner);
+    const definitionV2 = {
+      ...draft.body.definition,
+      sections: [...draft.body.definition.sections, { id: "s2", title: "Follow-up", order: 1 }],
+      fields: [
+        ...draft.body.definition.fields,
+        {
+          id: "field_follow_up",
+          key: "field_follow_up",
+          type: "multiline",
+          label: "Follow-up details",
+          required: false,
+          sectionId: "s2",
+          row: 0,
+          width: 12,
+          rules: []
+        }
+      ]
+    } satisfies FormDefinition;
+
+    const savedV2 = await withIdentity(
+      request(app).put(`/api/forms/${formId}/draft`).send({ expectedRevision: draft.body.revision, definition: definitionV2 }),
+      owner
+    );
+    expect(savedV2.status).toBe(200);
+
+    const publishV2 = await withIdentity(
+      request(app).post(`/api/forms/${formId}/publish`).send({ expectedRevision: savedV2.body.revision }),
+      owner
+    );
+    expect(publishV2.status).toBe(201);
+
+    const collabSubmission = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", createStableId("idem"))
+        .send({
+          formId,
+          definitionId: publishV2.body.definitionId,
+          values: { field_title: "collab submission", field_follow_up: "new layout field" }
+        }),
+      collab
+    );
+    expect(collabSubmission.status).toBe(201);
+
+    viewerAllowedRecords.add(ownerSubmission.body.recordId as string);
+
+    const versions = await withIdentity(request(app).get(`/api/forms/${formId}/versions`), owner);
+    expect(versions.status).toBe(200);
+    expect(versions.body.length).toBeGreaterThanOrEqual(2);
+
+    const versionOne = await withIdentity(request(app).get(`/api/forms/${formId}/versions/1`), owner);
+    expect(versionOne.status).toBe(200);
+    expect(versionOne.body.id).toBe(publishV1.body.definitionId);
+
+    const recordList = await withIdentity(request(app).get(`/api/records?formId=${formId}&pageSize=10`), owner);
+    expect(recordList.status).toBe(200);
+    expect(recordList.body.items.map((item: { recordId: string }) => item.recordId)).toEqual(
+      expect.arrayContaining([ownerSubmission.body.recordId, collabSubmission.body.recordId])
+    );
+
+    const ownerFiltered = await withIdentity(request(app).get(`/api/records?formId=${formId}&createdBy=owner1&pageSize=10`), owner);
+    expect(ownerFiltered.status).toBe(200);
+    expect(ownerFiltered.body.items.every((item: { createdBy: string }) => item.createdBy === "owner1")).toBe(true);
+
+    const viewerList = await withIdentity(request(app).get(`/api/records?pageSize=10`), viewer);
+    expect(viewerList.status).toBe(200);
+    expect(viewerList.body.items.every((item: { formId: string }) => item.formId === formId)).toBe(true);
+
+    const conflict = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", createStableId("idem"))
+        .send({
+          formId,
+          definitionId: publishV1.body.definitionId,
+          recordId,
+          expectedRevision: 99,
+          values: { field_title: "stale edit", field_attachment: uploaded.body.uploadId },
+          uploadIds: [uploaded.body.uploadId]
+        }),
+      owner
+    );
+    expect(conflict.status).toBe(409);
+    expect(conflict.body.code).toBe("RECORD_CONFLICT");
+
+    const edit = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", createStableId("idem"))
+        .send({
+          formId,
+          definitionId: publishV1.body.definitionId,
+          recordId,
+          expectedRevision: 1,
+          values: { field_title: "owner edit", field_attachment: uploaded.body.uploadId },
+          uploadIds: [uploaded.body.uploadId]
+        }),
+      owner
+    );
+    expect(edit.status).toBe(201);
+
+    const staleFollowUpEdit = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", createStableId("idem"))
+        .send({
+          formId,
+          definitionId: publishV1.body.definitionId,
+          recordId,
+          expectedRevision: 1,
+          values: { field_title: "late stale edit", field_attachment: uploaded.body.uploadId },
+          uploadIds: [uploaded.body.uploadId]
+        }),
+      owner
+    );
+    expect(staleFollowUpEdit.status).toBe(409);
+    expect(staleFollowUpEdit.body.code).toBe("RECORD_CONFLICT");
+
+    const history = await withIdentity(request(app).get(`/api/records/${recordId}/history`), owner);
+    expect(history.status).toBe(200);
+    expect(history.body[0].values.field_attachment).toBe(uploaded.body.uploadId);
+
+    const ownerDownload = await withIdentity(request(app).get(`/api/uploads/${uploaded.body.uploadId}/download`), owner);
+    expect(ownerDownload.status).toBe(200);
+
+    const viewerAllowedDownload = await withIdentity(request(app).get(`/api/uploads/${uploaded.body.uploadId}/download`), viewer);
+    expect(viewerAllowedDownload.status).toBe(200);
+
+    const collabUploadRecord = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", createStableId("idem"))
+        .send({
+          formId,
+          definitionId: publishV2.body.definitionId,
+          values: {
+            field_title: "collab attachment record",
+            field_attachment: uploadedCollab.body.uploadId,
+            field_follow_up: "with attachment"
+          },
+          uploadIds: [uploadedCollab.body.uploadId]
+        }),
+      collab
+    );
+    expect(collabUploadRecord.status).toBe(201);
+
+    const viewerDeniedDownload = await withIdentity(request(app).get(`/api/uploads/${uploadedCollab.body.uploadId}/download`), viewer);
+    expect(viewerDeniedDownload.status).toBe(403);
+
+    const outsiderDownload = await withIdentity(request(app).get(`/api/uploads/${uploaded.body.uploadId}/download`), outsider);
+    expect(outsiderDownload.status).toBe(404);
+  });
+
+  it("enforces publish eligibility, supports idempotent publish retries, and rejects republish without unpublished changes", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+    const created = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Publish eligibility ${Date.now()}`,
+        definition: createBaseDefinition("Publish eligibility")
+      }),
+      owner
+    );
+    expect(created.status).toBe(201);
+
+    const publishKey = `publish_${Date.now()}`;
+    const firstPublish = await withIdentity(
+      request(app)
+        .post(`/api/forms/${created.body.formId}/publish`)
+        .set("idempotency-key", publishKey)
+        .send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(firstPublish.status).toBe(201);
+
+    const retriedPublish = await withIdentity(
+      request(app)
+        .post(`/api/forms/${created.body.formId}/publish`)
+        .set("idempotency-key", publishKey)
+        .send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(retriedPublish.status).toBe(201);
+    expect(retriedPublish.body).toEqual(firstPublish.body);
+
+    const republishNoChanges = await withIdentity(
+      request(app).post(`/api/forms/${created.body.formId}/publish`).send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(republishNoChanges.status).toBe(409);
+    expect(republishNoChanges.body.code).toBe("NO_UNPUBLISHED_CHANGES");
+
+    const draft = await withIdentity(request(app).get(`/api/forms/${created.body.formId}/draft`), owner);
+    const unchangedSave = await withIdentity(
+      request(app).put(`/api/forms/${created.body.formId}/draft`).send({ expectedRevision: draft.body.revision, definition: draft.body.definition }),
+      owner
+    );
+    expect(unchangedSave.status).toBe(200);
+
+    const publishAfterUnchangedSave = await withIdentity(
+      request(app).post(`/api/forms/${created.body.formId}/publish`).send({ expectedRevision: unchangedSave.body.revision }),
+      owner
+    );
+    expect(publishAfterUnchangedSave.status).toBe(409);
+    expect(publishAfterUnchangedSave.body.code).toBe("NO_UNPUBLISHED_CHANGES");
+  });
+
+  it("blocks new submissions for archived forms while preserving historical retrieval", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+    const scopeId = `archive-test-${Date.now()}`;
+    const created = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Archive gate ${Date.now()}`,
+        definition: createBaseDefinition("Archive gate")
+      }),
+      owner
+    );
+    expect(created.status).toBe(201);
+
+    const published = await withIdentity(
+      request(app).post(`/api/forms/${created.body.formId}/publish`).send({ expectedRevision: created.body.draftRevision }),
+      owner
+    );
+    expect(published.status).toBe(201);
+
+    const beforeArchive = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", nextIdempotencyKey())
+        .send({ formId: created.body.formId, definitionId: published.body.definitionId, values: { field_title: "before archive" } }),
+      owner
+    );
+    expect(beforeArchive.status).toBe(201);
+
+    const archived = await withIdentity(request(app).post(`/api/forms/${created.body.formId}/archive`).send({}), owner);
+    expect(archived.status).toBe(204);
+
+    const blockedDirect = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", nextIdempotencyKey())
+        .send({ formId: created.body.formId, definitionId: published.body.definitionId, values: { field_title: "blocked direct" } }),
+      owner
+    );
+    expect(blockedDirect.status).toBe(409);
+    expect(blockedDirect.body.code).toBe("FORM_ARCHIVED");
+
+    const bindingSaved = await withIdentity(
+      request(app).put(`/api/bindings/workspace/${scopeId}`).send({
+        formId: created.body.formId,
+        mode: "pinned",
+        definitionId: published.body.definitionId,
+        expectedRevision: 0
+      }),
+      owner
+    );
+    expect(bindingSaved.status).toBe(200);
+
+    const blockedPinned = await withIdentity(
+      request(app)
+        .post("/api/records")
+        .set("idempotency-key", nextIdempotencyKey())
+        .send({
+          formId: created.body.formId,
+          definitionId: published.body.definitionId,
+          binding: {
+            scopeType: "workspace",
+            scopeId,
+            revision: bindingSaved.body.revision,
+            definitionId: published.body.definitionId
+          },
+          values: { field_title: "blocked pinned" }
+        }),
+      owner
+    );
+    expect(blockedPinned.status).toBe(409);
+    expect(blockedPinned.body.code).toBe("FORM_ARCHIVED");
+
+    const history = await withIdentity(request(app).get(`/api/records/${beforeArchive.body.recordId}/history`), owner);
+    expect(history.status).toBe(200);
+    expect(history.body[0].values.field_title).toBe("before archive");
+  });
+
+  it("supports delete-draft and discard-unpublished-changes without resurrecting stale saves", async () => {
+    const owner = { actorId: "owner1", tenantId: "tenant_alpha" };
+
+    const draftOnly = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Draft only ${Date.now()}`,
+        definition: createBaseDefinition("Draft only")
+      }),
+      owner
+    );
+    expect(draftOnly.status).toBe(201);
+
+    const deleted = await withIdentity(
+      request(app)
+        .delete(`/api/forms/${draftOnly.body.formId}/draft`)
+        .send({ expectedRevision: draftOnly.body.draftRevision }),
+      owner
+    );
+    expect(deleted.status).toBe(204);
+
+    const staleSaveAfterDelete = await withIdentity(
+      request(app).put(`/api/forms/${draftOnly.body.formId}/draft`).send({
+        expectedRevision: draftOnly.body.draftRevision,
+        definition: createBaseDefinition("Draft only")
+      }),
+      owner
+    );
+    expect(staleSaveAfterDelete.status).toBe(409);
+    expect(staleSaveAfterDelete.body.code).toBe("DRAFT_CONFLICT");
+
+    const published = await withIdentity(
+      request(app).post("/api/forms").send({
+        name: `Discard changes ${Date.now()}`,
+        definition: createBaseDefinition("Discard changes")
+      }),
+      owner
+    );
+    expect(published.status).toBe(201);
+
+    const firstPublish = await withIdentity(
+      request(app).post(`/api/forms/${published.body.formId}/publish`).send({ expectedRevision: published.body.draftRevision }),
+      owner
+    );
+    expect(firstPublish.status).toBe(201);
+
+    const draft = await withIdentity(request(app).get(`/api/forms/${published.body.formId}/draft`), owner);
+    const changedDefinition = {
+      ...draft.body.definition,
+      fields: draft.body.definition.fields.map((field: FormDefinition["fields"][number]) =>
+        field.id === "field_title" ? { ...field, label: "Changed title" } : field
+      )
+    } satisfies FormDefinition;
+
+    const saved = await withIdentity(
+      request(app).put(`/api/forms/${published.body.formId}/draft`).send({ expectedRevision: draft.body.revision, definition: changedDefinition }),
+      owner
+    );
+    expect(saved.status).toBe(200);
+
+    const discarded = await withIdentity(
+      request(app)
+        .post(`/api/forms/${published.body.formId}/discard-unpublished`)
+        .send({ expectedRevision: saved.body.revision }),
+      owner
+    );
+    expect(discarded.status).toBe(200);
+
+    const staleSaveAfterDiscard = await withIdentity(
+      request(app).put(`/api/forms/${published.body.formId}/draft`).send({ expectedRevision: saved.body.revision, definition: changedDefinition }),
+      owner
+    );
+    expect(staleSaveAfterDiscard.status).toBe(409);
+    expect(staleSaveAfterDiscard.body.code).toBe("DRAFT_CONFLICT");
+
+    const republishWithoutChanges = await withIdentity(
+      request(app).post(`/api/forms/${published.body.formId}/publish`).send({ expectedRevision: discarded.body.revision }),
+      owner
+    );
+    expect(republishWithoutChanges.status).toBe(409);
+    expect(republishWithoutChanges.body.code).toBe("NO_UNPUBLISHED_CHANGES");
   });
 });

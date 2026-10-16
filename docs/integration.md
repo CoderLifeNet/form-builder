@@ -38,3 +38,23 @@ Each release includes updated examples, migration notes and breaking-change guid
 A fresh consumer must complete the guide without inventing missing infrastructure or implementing engine internals.
 Test the reference path against documented package/database versions, including saved forms, failed requests, file permissions and upgrades.
 Publishing documentation to coderlife.net is a later explicit work package; this repository setup does not modify that site.
+
+## Current lifecycle behavior (first working version)
+
+The current implementation keeps one form identity with one mutable draft row and immutable published versions.
+
+1. Create form: starts as an unpublished draft (`hasUnpublishedChanges=true`, no published version).
+2. Publish draft: allowed only when unpublished changes exist; unchanged republish is rejected (`NO_UNPUBLISHED_CHANGES`).
+3. Publish idempotency: publish retries can use `idempotency-key` replay for safe duplicate-submit handling.
+4. Duplicate form: duplicates from latest published definition when available, otherwise from current draft.
+5. Draft cleanup:
+	- Never-published forms can delete draft+form identity (`DELETE /api/forms/:formId/draft`).
+	- Published forms can discard only unpublished draft changes (`POST /api/forms/:formId/discard-unpublished`).
+6. Archive behavior: archived forms reject new submissions/publish requests while version/record history remains readable.
+
+Reference UI state labels now map to server lifecycle state instead of draft-row existence:
+
+- unpublished draft
+- published with unpublished changes
+- published with no unpublished changes
+- archived

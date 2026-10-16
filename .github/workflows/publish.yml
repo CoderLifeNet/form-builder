@@ -1,0 +1,121 @@
+name: Prepare or publish alpha
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: Exact main commit approved for this release
+        required: true
+        type: string
+      mode:
+        description: Preparation never publishes; bootstrap requires an environment token
+        type: choice
+        default: prepare
+        options: [prepare, publish-oidc, publish-bootstrap]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: npm-alpha
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Require main and exact expected SHA
+        run: |
+          test "${GITHUB_REF}" = "refs/heads/main"
+          test "${{ inputs.expected_sha }}" = "${GITHUB_SHA}"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.22.3
+          registry-url: https://registry.npmjs.org
+
+      - run: npm install --global npm@11.11.1
+      - run: npm ci
+      - run: npm run build
+      - run: npm run typecheck
+      - run: npm run pack:artifacts
+      - run: npm run verify:consumer
+      - run: node scripts/check-release.mjs --available --dry-run
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: npm-alpha-${{ github.sha }}
+          path: |
+            tmp/packs/coderlifenet-form-builder-*.tgz
+            artifacts/release.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    needs: validate
+    if: inputs.mode != 'prepare'
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ 'npm-alpha' }}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.22.3
+
+      - run: npm install --global npm@11.11.1
+
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: npm-alpha-${{ github.sha }}
+          path: .
+
+      - run: node scripts/check-release.mjs --verify-only --available
+
+      - name: Inspect OIDC claims for npm audience
+        run: |
+          OIDC_RESPONSE=$(curl -sS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org")
+          OIDC_TOKEN=$(printf '%s' "$OIDC_RESPONSE" | node -p "JSON.parse(require('fs').readFileSync(0, 'utf8')).value")
+          printf '%s' "$OIDC_TOKEN" | node -e "const token=require('fs').readFileSync(0,'utf8').trim(); const payload=JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')); const {aud,repository,repository_owner,job_workflow_ref,workflow_ref,environment,ref,sha}=payload; console.log(JSON.stringify({aud,repository,repository_owner,job_workflow_ref,workflow_ref,environment,ref,sha}, null, 2));"
+
+      - name: Publish the validated tarball under alpha only
+        env:
+          NODE_AUTH_TOKEN: ${{ inputs.mode == 'publish-bootstrap' && secrets['NPM_BOOTSTRAP_TOKEN'] || '' }}
+          RELEASE_MODE: ${{ inputs.mode }}
+        run: |
+          TMP_NPMRC="$RUNNER_TEMP/.npmrc-release"
+          if [ "$RELEASE_MODE" = publish-bootstrap ]; then
+            test -n "$NODE_AUTH_TOKEN"
+            printf '//registry.npmjs.org/:_authToken=%s\nregistry=https://registry.npmjs.org/\n' "$NODE_AUTH_TOKEN" > "$TMP_NPMRC"
+            export NPM_CONFIG_USERCONFIG="$TMP_NPMRC"
+          else
+            printf 'registry=https://registry.npmjs.org/\n' > "$TMP_NPMRC"
+            export NPM_CONFIG_USERCONFIG="$TMP_NPMRC"
+            unset NODE_AUTH_TOKEN
+          fi
+          node scripts/check-release.mjs --publish
+
+      - name: Summarize npm debug logs safely on publish failure
+        if: failure()
+        run: |
+          log_dir="/home/runner/.npm/_logs"
+          ls -la "$log_dir" || true
+          for file in "$log_dir"/*-debug-*.log; do
+            [ -f "$file" ] || continue
+            echo "===== $(basename "$file") (sanitized summary) ====="
+            sed -E \
+              -e 's#(Authorization: Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+              -e 's#(//registry\.npmjs\.org/:_authToken=)[^[:space:]]+#\1[REDACTED]#g' \
+              -e 's#([?&](token|auth|authorization)=)[^&[:space:]]+#\1[REDACTED]#gi' \
+              "$file" | grep -E '^(npm ERR!|npm WARN|npm notice|[0-9]+ (verbose|silly) stack)' | tail -n 120 || true
+          done

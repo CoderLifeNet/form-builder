@@ -1,7 +1,22 @@
 {
   "name": "@coderlifenet/form-postgres",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.0",
   "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CoderLifeNet/form-builder.git",
+    "directory": "packages/form-postgres"
+  },
+  "bugs": {
+    "url": "https://github.com/CoderLifeNet/form-builder/issues"
+  },
+  "homepage": "https://github.com/CoderLifeNet/form-builder/tree/main/packages/form-postgres",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha",
+    "provenance": true
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,12 +35,17 @@
     "db:seed": "node dist/seed.js"
   },
   "dependencies": {
-    "@coderlifenet/form-core": "0.1.0",
+    "@coderlifenet/form-core": "0.1.0-alpha.0",
     "pg": "8.16.3"
   },
   "devDependencies": {
     "@types/pg": "8.15.5",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
-  }
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md"
+  ]
 }

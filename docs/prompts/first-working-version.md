@@ -40,7 +40,7 @@ Default to a TypeScript workspace with:
 - React renderer and reusable form manager/builder/record-history components, organized by responsibility.
 - Node.js service with a thin Express HTTP adapter.
 - Storage contracts and a PostgreSQL reference implementation. Default to explicit SQL migrations and a maintained PostgreSQL driver rather than adding an ORM solely for convenience. If current repository code already establishes a viable maintained alternative, retain it and explain the choice.
-- Upload storage contracts and an S3-compatible reference integration. Provide a local object-storage development setup, such as MinIO, so uploads actually work without a paid external account.
+- Upload storage contracts with a private filesystem baseline and optional S3-compatible integration. Provide an optional pinned Garage development setup for S3 testing; consumers do not need an object-storage server to use traditional uploads.
 - A Vite/React reference host application using the real service and database.
 - Package artifacts and an external-consumer smoke fixture that install packed tarballs, not only workspace source aliases.
 

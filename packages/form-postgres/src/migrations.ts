@@ -122,5 +122,15 @@ export const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_uploads_tenant_status ON uploads(tenant_id, status);
       CREATE INDEX IF NOT EXISTS idx_idempotency_expiry ON idempotency_keys(expires_at);
     `
+  },
+  {
+    id: "0002_storage_deletion_queue",
+    sql: `CREATE TABLE IF NOT EXISTS storage_deletions (
+      tenant_id TEXT NOT NULL,
+      object_key TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (tenant_id, object_key)
+    );
+    ALTER TABLE form_bindings ADD COLUMN IF NOT EXISTS revision INTEGER NOT NULL DEFAULT 1;`
   }
 ];

@@ -1,6 +1,7 @@
 {
   "name": "coderlifenet-form-builder-workspace",
   "private": true,
+  "license": "MIT",
   "version": "0.1.0",
   "description": "CoderLife reusable form engine workspace",
   "workspaces": [
@@ -13,14 +14,32 @@
     "npm": ">=10.9.8"
   },
   "scripts": {
-    "build": "npm run build -w @coderlifenet/form-core && npm run build -w @coderlifenet/form-postgres && npm run build -w @coderlifenet/form-server && npm run build -w @coderlifenet/form-react && npm run build -w @coderlifenet/form-builder && npm run build -w example-minimal && npm run build -w example-workspace",
+    "build": "npm run build -w @coderlifenet/form-builder && npm run build -w example-minimal && npm run build -w example-workspace",
+    "dev": "node scripts/dev-local.mjs workspace",
+    "dev:workspace": "node scripts/dev-local.mjs workspace",
+    "dev:minimal": "node scripts/dev-local.mjs minimal",
     "test": "npm run test -ws --if-present",
     "typecheck": "npm run typecheck -ws --if-present",
-    "pack:artifacts": "rm -rf tmp/packs && mkdir -p tmp/packs && npm pack -w @coderlifenet/form-core --pack-destination tmp/packs && npm pack -w @coderlifenet/form-postgres --pack-destination tmp/packs && npm pack -w @coderlifenet/form-server --pack-destination tmp/packs && npm pack -w @coderlifenet/form-react --pack-destination tmp/packs && npm pack -w @coderlifenet/form-builder --pack-destination tmp/packs",
+    "pack:artifacts": "rm -rf tmp/packs && mkdir -p tmp/packs && npm pack -w @coderlifenet/form-builder --pack-destination tmp/packs",
+    "check:release": "node scripts/check-release.mjs",
+    "check:release:available": "node scripts/check-release.mjs --available",
+    "check:release:dry-run": "node scripts/check-release.mjs --available --dry-run",
+    "check:release:publish": "node scripts/check-release.mjs --publish",
     "verify:consumer": "npm run verify -w consumer-smoke",
     "dev:infra": "docker compose up -d postgres",
     "dev:infra:down": "docker compose down -v",
     "db:migrate": "npm run db:migrate -w @coderlifenet/form-postgres",
-    "db:seed": "npm run db:seed -w @coderlifenet/form-postgres"
+    "db:seed": "npm run db:seed -w @coderlifenet/form-postgres",
+    "test:browser": "playwright test",
+    "test:browser:workspace": "playwright test -c playwright.workspace.config.ts",
+    "test:integration": "node scripts/test-integration.mjs"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.10.2",
+    "@playwright/test": "1.56.1",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "jsdom": "26.1.0",
+    "vitest": "3.2.4"
   }
 }
