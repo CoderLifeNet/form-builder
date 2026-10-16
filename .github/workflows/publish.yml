@@ -105,12 +105,17 @@ jobs:
           fi
           node scripts/check-release.mjs --publish
 
-      - name: Dump npm debug logs on publish failure
+      - name: Summarize npm debug logs safely on publish failure
         if: failure()
         run: |
-          ls -la /home/runner/.npm/_logs || true
-          for file in /home/runner/.npm/_logs/*-debug-*.log; do
+          log_dir="/home/runner/.npm/_logs"
+          ls -la "$log_dir" || true
+          for file in "$log_dir"/*-debug-*.log; do
             [ -f "$file" ] || continue
-            echo "===== $file ====="
-            cat "$file"
+            echo "===== $(basename "$file") (sanitized summary) ====="
+            sed -E \
+              -e 's#(Authorization: Bearer )[A-Za-z0-9._-]+#\1[REDACTED]#g' \
+              -e 's#(//registry\.npmjs\.org/:_authToken=)[^[:space:]]+#\1[REDACTED]#g' \
+              -e 's#([?&](token|auth|authorization)=)[^&[:space:]]+#\1[REDACTED]#gi' \
+              "$file" | grep -E '^(npm ERR!|npm WARN|npm notice|[0-9]+ (verbose|silly) stack)' | tail -n 120 || true
           done
