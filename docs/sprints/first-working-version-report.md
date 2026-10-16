@@ -94,8 +94,44 @@ Workflow availability check:
 
 Trusted-publishing compatibility hardening:
 
-- Updated `.github/workflows/publish.yml` to install npm `11.5.1` before `npm ci`.
+- Updated `.github/workflows/publish.yml` to install npm `11.11.1` before `npm ci`.
 - Kept workflow Node at `22.22.3` (meets npm trusted publishing minimum Node `22.14.0+`).
+
+## Continuation: publish automation parity with ui-core/ui-components (2026-10-16)
+
+Branch: `feat/ui-0.2-integration`.
+
+Scope completed in this pass:
+
+- Replaced legacy `release_version`/`publish` dispatch contract with `expected_sha` + `mode` (`prepare`, `publish-bootstrap`, `publish-oidc`).
+- Added hard gate for exact release identity: workflow now fails unless running on `main` and `expected_sha == github.sha`.
+- Split workflow into `validate` and `publish` jobs with artifact handoff.
+- Added deterministic release report generation (`artifacts/release.json`) and publish-time identity verification.
+- Added environment-gated publish path using `npm-alpha` and isolated bootstrap-token use only in `publish-bootstrap` mode.
+- Added release tooling scripts:
+  - `scripts/check-release.mjs`
+  - `scripts/publish-tarball.mjs`
+- Added root convenience scripts: `check:release*`.
+- Updated release playbook to the new mode-based sequence and removed local bootstrap publication guidance.
+
+Validation evidence for this pass:
+
+| Command | Result |
+| --- | --- |
+| `npm run pack:artifacts` | PASS |
+| `npm run check:release` | PASS (`artifacts/release.json` created with tarball hashes/integrity and source commit) |
+| `npm run check:release:dry-run` | PASS (`npm publish --dry-run` via guarded release script) |
+
+Repository environment/secret state check (no secret values printed):
+
+- GitHub environments for `CoderLifeNet/form-builder`: none detected.
+- `npm-alpha` environment secret listing endpoint returns not found (environment not yet created).
+
+Operational follow-up still required before first real publish:
+
+1. Create repository environment `npm-alpha`.
+2. Add environment secret `NPM_BOOTSTRAP_TOKEN` for bootstrap mode only.
+3. Configure npm trusted publisher mapping for `CoderLifeNet/form-builder` + `.github/workflows/publish.yml`.
 
 ## Continuation: rename correctness correction on feat/ui-0.2-integration (2026-10-14)
 
