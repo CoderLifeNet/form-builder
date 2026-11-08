@@ -1,7 +1,7 @@
 # Published UI integration and verification
 
-This internal form-engine candidate uses exactly `@coderlifenet/ui-core@0.2.0-alpha.0`
-and `@coderlifenet/ui-components@0.2.0-alpha.0`. Do not install `latest`, which currently
+This internal form-engine candidate uses exactly `@coderlifenet/ui-core@0.2.0-alpha.1`
+and `@coderlifenet/ui-components@0.2.0-alpha.1`. Do not install `latest`, which currently
 selects the older core release. Registry metadata was inspected for both exact versions.
 The installed peer stack is React/React DOM 19.2.8, MUI 9.4.0, Emotion React 11.14.0,
 and Emotion Styled 11.14.1. Specialized ui-components exports are checked by the

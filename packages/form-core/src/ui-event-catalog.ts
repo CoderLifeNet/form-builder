@@ -1,4 +1,4 @@
-// Snapshot of published ui-core 0.2.0-alpha.0; checked against registry in consumer tests.
+// Snapshot of published ui-core 0.2.0-alpha.1; checked against registry in consumer tests.
 export const supportedTrackingEvents: readonly string[] = [
   "ui.button.click",
   "ui.icon_button.click",

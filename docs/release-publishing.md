@@ -20,7 +20,7 @@ Registry tags verified after publication. Only the form builder's `alpha` tag mo
 | `@coderlifenet/ui-core` | `0.2.0-alpha.0` | `0.1.0-alpha.2` |
 | `@coderlifenet/ui-components` | `0.2.0-alpha.0` | `0.1.0-alpha.2` |
 
-The form builder pins both published UI packages to `0.2.0-alpha.0`.
+The published form-builder `0.1.0-alpha.1` release pins both UI packages to `0.2.0-alpha.0`. The current source targets the exact npm-published `0.2.0-alpha.1` UI pair for a future release.
 
 TrackForge Atlas implementation remains on hold pending capture-scope and design decisions. The builder serves user-configurable workspace and project workflows, and ordinary app forms use `ui-core`. See the [TrackForge integration boundary](trackforge-integration.md).
 
