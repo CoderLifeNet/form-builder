@@ -2,7 +2,7 @@
 
 A reusable form engine for visually designing forms, publishing immutable definitions, collecting and editing records, and reviewing historical changes.
 
-Status: implementation baseline in progress with first public package preparation for `@coderlifenet/form-builder@0.1.0-alpha.0` (not yet published).
+Status: `@coderlifenet/form-builder` is available as a public alpha. See the [changelog](CHANGELOG.md) for release details.
 
 This repository now contains a runnable monorepo with one public artifact (`@coderlifenet/form-builder`) and internal support modules for core contracts, renderer, server, and PostgreSQL integration.
 

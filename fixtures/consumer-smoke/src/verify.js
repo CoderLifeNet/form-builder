@@ -6,7 +6,7 @@ const root = path.resolve(process.cwd(), "..", "..");
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), "form-consumer-"));
 try {
   const dependencies = {
-    "@coderlifenet/form-builder": `file:${path.join(root, "tmp/packs", "coderlifenet-form-builder-0.1.0-alpha.0.tgz")}`,
+    "@coderlifenet/form-builder": `file:${path.join(root, "tmp/packs", "coderlifenet-form-builder-0.1.0-alpha.1.tgz")}`,
     "@coderlifenet/ui-core": "0.2.0-alpha.0",
     "@coderlifenet/ui-components": "0.2.0-alpha.0",
     react: "19.2.8",

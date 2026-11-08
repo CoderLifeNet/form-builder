@@ -5,8 +5,10 @@ Single public package for form definition authoring, rendering, server APIs, and
 ## Install
 
 ```bash
-npm install @coderlifenet/form-builder@0.1.0-alpha.0 react react-dom @coderlifenet/ui-core@0.2.0-alpha.0 @coderlifenet/ui-components@0.2.0-alpha.0
+npm install @coderlifenet/form-builder@0.1.0-alpha.1 react react-dom @coderlifenet/ui-core@0.2.0-alpha.0 @coderlifenet/ui-components@0.2.0-alpha.0
 ```
+
+Pin the form builder and both UI packages to the versions in this command for this prerelease. The npm `latest` tag for the UI packages may resolve to an older version.
 
 The package exports browser and server integrations via subpaths.
 
