@@ -1,18 +1,28 @@
 # Package publishing playbook
 
-This repository prepares a first public delivery for one package:
-
-- @coderlifenet/form-builder
+This repository publishes one public package, `@coderlifenet/form-builder`.
 
 Root workspace, examples, fixtures, and internal support packages remain private and are not published.
 
 License is approved as MIT. Keep publication approval and execution separate from license approval.
 
-## Current release candidate
+## Release checkpoint
 
-- Candidate package: `@coderlifenet/form-builder@0.1.0-alpha.1`
-- Candidate source branch: `main` after the release PR merges
-- Candidate artifact path: `tmp/packs/coderlifenet-form-builder-0.1.0-alpha.1.tgz`
+- `@coderlifenet/form-builder@0.1.0-alpha.1` is the docs-only prerelease from `main` at `a5d517f9d39a96e048892893c45419a7335afe78`. The [prepare run](https://github.com/CoderLifeNet/form-builder/actions/runs/42437596471) and [publish-oidc run](https://github.com/CoderLifeNet/form-builder/actions/runs/42438236248) passed.
+- npm shows the GitHub Actions trusted publisher as **Valid** for `CoderLifeNet/form-builder`, `publish.yml`, and `npm-alpha`, with `npm publish`, `npm stage publish`, and `npm dist-tag` allowed. Use `publish-oidc` for future approved releases. [npm package settings](https://www.npmjs.com/package/@coderlifenet/form-builder/access)
+- The signed Sigstore provenance verified against the release commit and tarball digest. The registry tarball matched the prepared artifact, and a clean install passed export, TypeScript, browser/server separation, host theme and analytics composition, and backend health checks. [Sigstore transparency log](https://search.sigstore.dev/?logIndex=3747788041)
+
+Registry tags verified after publication. Only the form builder's `alpha` tag moved.
+
+| npm package | `alpha` | `latest` |
+| --- | --- | --- |
+| `@coderlifenet/form-builder` | `0.1.0-alpha.1` | `0.1.0-alpha.0` |
+| `@coderlifenet/ui-core` | `0.2.0-alpha.0` | `0.1.0-alpha.2` |
+| `@coderlifenet/ui-components` | `0.2.0-alpha.0` | `0.1.0-alpha.2` |
+
+The form builder pins both published UI packages to `0.2.0-alpha.0`.
+
+TrackForge Atlas implementation remains on hold pending capture-scope and design decisions. The builder serves user-configurable workspace and project workflows, and ordinary app forms use `ui-core`. See the [TrackForge integration boundary](trackforge-integration.md).
 
 ## Workflow contract
 
