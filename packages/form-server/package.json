@@ -1,6 +1,6 @@
 {
   "name": "@coderlifenet/form-server",
-  "version": "0.1.0-alpha.0",
+  "version": "0.1.0-alpha.1",
   "private": true,
   "license": "MIT",
   "repository": {
@@ -34,8 +34,8 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1152.0",
-    "@coderlifenet/form-core": "0.1.0-alpha.0",
-    "@coderlifenet/form-postgres": "0.1.0-alpha.0",
+    "@coderlifenet/form-core": "0.1.0-alpha.1",
+    "@coderlifenet/form-postgres": "0.1.0-alpha.1",
     "cookie-parser": "1.4.7",
     "cors": "2.8.5",
     "express": "5.1.0",

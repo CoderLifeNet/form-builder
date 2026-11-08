@@ -10,9 +10,9 @@ License is approved as MIT. Keep publication approval and execution separate fro
 
 ## Current release candidate
 
-- Candidate package: `@coderlifenet/form-builder@0.1.0-alpha.0`
-- Candidate source branch: `feat/ui-0.2-integration`
-- Candidate artifact path: `tmp/packs/coderlifenet-form-builder-0.1.0-alpha.0.tgz`
+- Candidate package: `@coderlifenet/form-builder@0.1.0-alpha.1`
+- Candidate source branch: `main` after the release PR merges
+- Candidate artifact path: `tmp/packs/coderlifenet-form-builder-0.1.0-alpha.1.tgz`
 
 ## Workflow contract
 
