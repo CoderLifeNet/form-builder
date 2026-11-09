@@ -1,6 +1,6 @@
 {
   "name": "@coderlifenet/form-builder",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": false,
   "license": "MIT",
   "repository": {
@@ -83,8 +83,8 @@
     "zod": "4.1.11"
   },
   "peerDependencies": {
-    "@coderlifenet/ui-core": "0.2.0-alpha.0",
-    "@coderlifenet/ui-components": "0.2.0-alpha.0",
+    "@coderlifenet/ui-core": "0.2.0-alpha.1",
+    "@coderlifenet/ui-components": "0.2.0-alpha.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

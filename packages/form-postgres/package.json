@@ -1,6 +1,6 @@
 {
   "name": "@coderlifenet/form-postgres",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "license": "MIT",
   "repository": {
@@ -35,7 +35,7 @@
     "db:seed": "node dist/seed.js"
   },
   "dependencies": {
-    "@coderlifenet/form-core": "0.1.0-alpha.1",
+    "@coderlifenet/form-core": "0.1.0-alpha.2",
     "pg": "8.16.3"
   },
   "devDependencies": {

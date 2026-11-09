@@ -8,7 +8,7 @@ This repository now contains a runnable monorepo with one public artifact (`@cod
 
 Scope is still in active delivery. Not every requirement from `docs/prompts/first-working-version.md` is complete yet. See sprint evidence for exact pass/partial/fail items.
 
-The public package targets the exact published `0.2.0-alpha.0` UI pair through host-owned runtime integration. See [UI integration](docs/ui-integration.md) for tracking, accessibility and verification.
+The `0.1.0-alpha.2` source candidate targets the exact published `0.2.0-alpha.1` UI pair through host-owned runtime integration. The published form-builder `0.1.0-alpha.1` release requires the `0.2.0-alpha.0` UI pair. See [UI integration](docs/ui-integration.md) for tracking, accessibility and verification.
 
 ## Quick start
 
