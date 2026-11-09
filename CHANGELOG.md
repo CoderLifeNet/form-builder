@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-alpha.2
+
+- Adopted the exact npm-published UI Core and Components `0.2.0-alpha.1` pair in the package peers, workspace examples, and packed consumer. Hosts continue to own the theme, analytics runtime, and consent.
+
 ## 0.1.0-alpha.1
 
 - Clarified exact-version installation for the form builder and its published UI peers. No runtime, API, or database schema changes.

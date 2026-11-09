@@ -1,6 +1,6 @@
 {
   "name": "@coderlifenet/form-react",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "private": true,
   "license": "MIT",
   "repository": {
@@ -38,7 +38,7 @@
     "react-dom": "^19.2.8"
   },
   "dependencies": {
-    "@coderlifenet/form-core": "0.1.0-alpha.1"
+    "@coderlifenet/form-core": "0.1.0-alpha.2"
   },
   "devDependencies": {
     "@types/react": "19.2.2",

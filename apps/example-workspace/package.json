@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@coderlifenet/form-builder": "0.1.0-alpha.1",
+    "@coderlifenet/form-builder": "0.1.0-alpha.2",
     "@coderlifenet/ui-core": "0.2.0-alpha.1",
     "react": "19.2.8",
     "react-dom": "19.2.8",
